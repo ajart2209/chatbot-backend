@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel de Administración — Chatbots</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,'Segoe UI',sans-serif}
+  body{background:linear-gradient(160deg,#F5EEFF,#E3F0FF);color:#241B4D;min-height:100vh}
+  .top{background:linear-gradient(135deg,#7C5CFA,#4C31D6);color:#fff;padding:18px 26px;display:flex;align-items:center;gap:12px;box-shadow:0 6px 20px rgba(76,49,214,.25)}
+  .top h1{font-size:19px;font-weight:800}
+  .top .logout{margin-left:auto;background:rgba(255,255,255,.2);border:none;color:#fff;padding:8px 16px;border-radius:999px;cursor:pointer;font-weight:600;font-size:13px}
+  .wrap{max-width:1000px;margin:0 auto;padding:26px}
+
+  .login{max-width:380px;margin:80px auto;background:#fff;border-radius:20px;padding:34px;box-shadow:0 20px 50px rgba(76,49,214,.18);text-align:center}
+  .login h2{font-size:22px;margin-bottom:6px}
+  .login p{color:#777;font-size:14px;margin-bottom:22px}
+  input,textarea,select{width:100%;padding:12px 14px;border:1.5px solid #E2DBF5;border-radius:11px;font-size:14px;margin-bottom:14px;font-family:inherit;background:#fff}
+  input:focus,textarea:focus{outline:none;border-color:#7C5CFA}
+  textarea{resize:vertical;min-height:90px}
+  .btn{background:linear-gradient(135deg,#7C5CFA,#4C31D6);color:#fff;border:none;padding:12px 22px;border-radius:11px;font-weight:700;font-size:14px;cursor:pointer;box-shadow:0 8px 18px rgba(76,49,214,.28)}
+  .btn:hover{opacity:.93}
+  .btn.sec{background:#fff;color:#4C31D6;border:1.5px solid #D9CFF5;box-shadow:none}
+  .btn.danger{background:#fff;color:#DC2626;border:1.5px solid #FBD5D5;box-shadow:none}
+  .msg{font-size:13px;color:#DC2626;margin-bottom:10px;min-height:16px}
+
+  .bar{display:flex;align-items:center;margin-bottom:20px;gap:12px}
+  .bar h2{font-size:20px}
+  .bar .btn{margin-left:auto}
+
+  .card{background:#fff;border-radius:16px;padding:18px 20px;margin-bottom:14px;box-shadow:0 6px 18px rgba(76,49,214,.08);display:flex;align-items:center;gap:14px}
+  .dot{width:14px;height:14px;border-radius:50%;flex-shrink:0}
+  .card .info h3{font-size:16px}
+  .card .info span{font-size:12.5px;color:#8A82AD}
+  .card .acts{margin-left:auto;display:flex;gap:8px}
+  .card .acts button{font-size:13px;padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:600;border:1.5px solid #E2DBF5;background:#fff;color:#4C31D6}
+  .card .acts button.del{color:#DC2626;border-color:#FBD5D5}
+
+  .overlay{position:fixed;inset:0;background:rgba(36,27,77,.45);display:none;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50}
+  .overlay.show{display:flex}
+  .modal{background:#fff;border-radius:20px;padding:26px;max-width:560px;width:100%;box-shadow:0 30px 70px rgba(0,0,0,.3)}
+  .modal h2{font-size:19px;margin-bottom:16px}
+  label{display:block;font-size:13px;font-weight:700;margin-bottom:5px;color:#4A4270}
+  .hint{font-size:12px;color:#9089AD;font-weight:400;margin-bottom:5px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .chk{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+  .chk input{width:auto;margin:0}
+  .modal .foot{display:flex;gap:10px;justify-content:flex-end;margin-top:6px}
+  .embed{background:#F5F2FF;border:1px solid #E2DBF5;border-radius:10px;padding:12px;font-size:12px;font-family:monospace;word-break:break-all;margin-bottom:8px;color:#4C31D6}
+  .copied{color:#059669;font-size:12px;font-weight:700}
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="login">
+  <h2>🔒 Panel de Admin</h2>
+  <p>Ingresa tu contraseña de administrador</p>
+  <input type="password" id="passInput" placeholder="Contraseña" onkeydown="if(event.key==='Enter')login()">
+  <div class="msg" id="loginMsg"></div>
+  <button class="btn" style="width:100%" onclick="login()">Entrar</button>
+</div>
+
+<div id="app" style="display:none">
+  <div class="top">
+    <span style="font-size:22px">🤖</span>
+    <h1>Panel de Chatbots</h1>
+    <button class="logout" onclick="logout()">Salir</button>
+  </div>
+  <div class="wrap">
+    <div class="bar">
+      <h2>Tus clientes</h2>
+      <button class="btn" onclick="openForm()">+ Nuevo cliente</button>
+    </div>
+    <div id="lista"></div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h2 id="formTitle">Nuevo cliente</h2>
+
+    <label>ID del cliente <span class="hint">(sin espacios, ej: peluqueria789 — este es el "data-cliente")</span></label>
+    <input id="f_id" placeholder="peluqueria789">
+
+    <div class="row2">
+      <div>
+        <label>Nombre del negocio</label>
+        <input id="f_negocio" placeholder="Peluquería Estilo">
+      </div>
+      <div>
+        <label>Subtítulo</label>
+        <input id="f_subtitulo" placeholder="Asistente virtual">
+      </div>
+    </div>
+
+    <div class="row2">
+      <div>
+        <label>Color (hex)</label>
+        <input id="f_color" placeholder="#6C4BF6">
+      </div>
+      <div>
+        <label>WhatsApp <span class="hint">(con código país)</span></label>
+        <input id="f_whatsapp" placeholder="593991234567">
+      </div>
+    </div>
+
+    <label>Mensaje de bienvenida</label>
+    <textarea id="f_bienvenida" placeholder="¡Hola! Soy el asistente de..."></textarea>
+
+    <label>Botones rápidos <span class="hint">(uno por línea)</span></label>
+    <textarea id="f_chips" placeholder="¿Qué servicios ofrecen?&#10;¿Cuál es el horario?&#10;Quiero agendar una cita"></textarea>
+
+    <div class="chk">
+      <input type="checkbox" id="f_agendar" checked>
+      <label style="margin:0">Permitir agendar citas</label>
+    </div>
+
+    <label>Información del negocio (base de conocimiento)</label>
+    <div class="hint">Todo lo que el bot debe saber: servicios, precios, horarios, dirección, garantía, etc.</div>
+    <textarea id="f_info" style="min-height:150px" placeholder="NEGOCIO: ... HORARIOS: ... SERVICIOS Y PRECIOS: ..."></textarea>
+
+    <div id="embedBox" style="display:none">
+      <label>Línea para pegar en la web del cliente</label>
+      <div class="embed" id="embedCode"></div>
+      <button class="btn sec" onclick="copyEmbed()">Copiar línea</button>
+      <span class="copied" id="copiedMsg" style="display:none">¡Copiado! ✓</span>
+    </div>
+
+    <div class="msg" id="formMsg"></div>
+    <div class="foot">
+      <button class="btn sec" onclick="closeForm()">Cancelar</button>
+      <button class="btn" onclick="save()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let PASS = "";
+  let editando = null;
+
+  async function api(method, pathUrl, body){
+    const opt = { method, headers: { "x-admin-password": PASS } };
+    if(body){ opt.headers["Content-Type"]="application/json"; opt.body=JSON.stringify(body); }
+    const r = await fetch(pathUrl, opt);
+    if(r.status===401) throw new Error("401");
+    const data = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(data.error || "Error");
+    return data;
+  }
+
+  async function login(){
+    PASS = document.getElementById("passInput").value;
+    try{
+      await api("GET","/admin/api/clientes");
+      document.getElementById("loginScreen").style.display="none";
+      document.getElementById("app").style.display="block";
+      cargar();
+    }catch(e){
+      document.getElementById("loginMsg").textContent = e.message==="401" ? "Contraseña incorrecta." : "No se pudo conectar.";
+      PASS="";
+    }
+  }
+
+  function logout(){ PASS=""; location.reload(); }
+
+  async function cargar(){
+    const lista = document.getElementById("lista");
+    lista.innerHTML = "Cargando...";
+    try{
+      const clientes = await api("GET","/admin/api/clientes");
+      if(!clientes.length){ lista.innerHTML = "<p style='color:#8A82AD'>Aún no tienes clientes. Crea el primero con «+ Nuevo cliente».</p>"; return; }
+      lista.innerHTML = "";
+      clientes.forEach(c=>{
+        const div = document.createElement("div");
+        div.className="card";
+        div.innerHTML = `
+          <div class="dot" style="background:${c.color||'#6C4BF6'}"></div>
+          <div class="info"><h3>${escapeHtml(c.negocio)}</h3><span>ID: ${escapeHtml(c.cliente_id)}</span></div>
+          <div class="acts">
+            <button onclick='editar(${JSON.stringify(c.cliente_id)})'>Editar</button>
+            <button class="del" onclick='borrar(${JSON.stringify(c.cliente_id)}, ${JSON.stringify(c.negocio)})'>Borrar</button>
+          </div>`;
+        lista.appendChild(div);
+      });
+      window._clientes = clientes;
+    }catch(e){ lista.innerHTML = "<p style='color:#DC2626'>Error al cargar: "+e.message+"</p>"; }
+  }
+
+  function openForm(c){
+    editando = c ? c.cliente_id : null;
+    document.getElementById("formTitle").textContent = c ? "Editar cliente" : "Nuevo cliente";
+    document.getElementById("f_id").value = c?c.cliente_id:"";
+    document.getElementById("f_id").disabled = !!c;
+    document.getElementById("f_negocio").value = c?c.negocio:"";
+    document.getElementById("f_subtitulo").value = c?(c.subtitulo||""):"Asistente virtual";
+    document.getElementById("f_color").value = c?(c.color||"#6C4BF6"):"#6C4BF6";
+    document.getElementById("f_whatsapp").value = c?(c.whatsapp||""):"";
+    document.getElementById("f_bienvenida").value = c?(c.bienvenida||""):"";
+    document.getElementById("f_chips").value = c&&c.chips?c.chips.join("\n"):"";
+    document.getElementById("f_agendar").checked = c?c.agendar_activo!==false:true;
+    document.getElementById("f_info").value = c?(c.info||""):"";
+    document.getElementById("formMsg").textContent = "";
+    updateEmbed();
+    document.getElementById("overlay").classList.add("show");
+  }
+  function editar(id){ openForm((window._clientes||[]).find(x=>x.cliente_id===id)); }
+  function closeForm(){ document.getElementById("overlay").classList.remove("show"); }
+
+  function updateEmbed(){
+    const id = document.getElementById("f_id").value.trim();
+    const box = document.getElementById("embedBox");
+    if(id){
+      box.style.display="block";
+      document.getElementById("embedCode").textContent =
+        `<script src="${location.origin}/widget.js?v=2" data-cliente="${id}"><\/script>`;
+    }else{ box.style.display="none"; }
+  }
+  document.getElementById("f_id").addEventListener("input", updateEmbed);
+
+  function copyEmbed(){
+    navigator.clipboard.writeText(document.getElementById("embedCode").textContent);
+    const m=document.getElementById("copiedMsg"); m.style.display="inline"; setTimeout(()=>m.style.display="none",1800);
+  }
+
+  async function save(){
+    const body = {
+      cliente_id: document.getElementById("f_id").value.trim(),
+      negocio: document.getElementById("f_negocio").value.trim(),
+      subtitulo: document.getElementById("f_subtitulo").value.trim(),
+      color: document.getElementById("f_color").value.trim(),
+      whatsapp: document.getElementById("f_whatsapp").value.trim(),
+      bienvenida: document.getElementById("f_bienvenida").value.trim(),
+      chips: document.getElementById("f_chips").value.split("\n").map(s=>s.trim()).filter(Boolean),
+      agendar_activo: document.getElementById("f_agendar").checked,
+      info: document.getElementById("f_info").value.trim()
+    };
+    if(!body.cliente_id || !body.negocio){ document.getElementById("formMsg").textContent="El ID y el nombre del negocio son obligatorios."; return; }
+    try{
+      await api("POST","/admin/api/clientes", body);
+      closeForm(); cargar();
+    }catch(e){ document.getElementById("formMsg").textContent="Error al guardar: "+e.message; }
+  }
+
+  async function borrar(id, nombre){
+    if(!confirm('¿Borrar el cliente "'+nombre+'"? Esta acción no se puede deshacer.')) return;
+    try{ await api("DELETE","/admin/api/clientes?cliente_id="+encodeURIComponent(id)); cargar(); }
+    catch(e){ alert("Error al borrar: "+e.message); }
+  }
+
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+</script>
+</body>
+</html>
