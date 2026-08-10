@@ -362,6 +362,7 @@ app.post("/webhook", async (req, res) => {
     if (!msg || msg.type !== "text") return; // solo mensajes de texto
     const from = msg.from;
     const texto = msg.text.body;
+    console.log("➡️ WhatsApp recibido de", from, ":", texto);
 
     const c = await getCliente(WA_CLIENTE);
     if (!c) { console.error("⚠️ WHATSAPP_CLIENTE no existe en la base:", WA_CLIENTE); return; }
@@ -444,6 +445,21 @@ ${c.whatsapp ? `WHATSAPP para derivar cuando haga falta: ${c.whatsapp}.\n` : ""}
 ` : ""}EMOCIÓN: termina SIEMPRE tu mensaje con una etiqueta oculta de tu estado de ánimo, en una línea aparte y con este formato exacto: [M:feliz] · [M:neutral] · [M:triste] · [M:enojado] · [M:sorprendido] · [M:confundido]. Usa "feliz" al saludar o dar buenas noticias, "neutral" para respuestas normales, "confundido" si no entiendes, "triste" si no puedes ayudar, "sorprendido" ante algo inesperado. Nunca expliques la etiqueta.`;
 }
 
+// Suscribe la cuenta de WhatsApp (WABA) a esta app -> necesario para recibir mensajes REALES
+async function suscribirWABA() {
+  const waba = process.env.WHATSAPP_WABA_ID;
+  if (!waba || !WA_TOKEN) { console.log("💬 WABA:", waba ? "(falta token)" : "(falta WHATSAPP_WABA_ID)"); return; }
+  try {
+    const r = await fetch(`https://graph.facebook.com/v21.0/${waba}/subscribed_apps`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + WA_TOKEN }
+    });
+    const d = await r.json();
+    if (r.ok) console.log("✅ WABA suscrita a la app (los mensajes reales ya deben llegar).");
+    else console.error("⚠️ No se pudo suscribir la WABA:", JSON.stringify(d));
+  } catch (e) { console.error("💥 Error suscribiendo WABA:", e); }
+}
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("🔑 API key Anthropic:", process.env.ANTHROPIC_API_KEY ? "OK" : "🚨 FALTA");
@@ -452,4 +468,5 @@ app.listen(PORT, () => {
   console.log("🔒 Admin password:", ADMIN_PASS ? "OK" : "🚨 FALTA");
   console.log("💬 WhatsApp:", (WA_TOKEN && WA_PHONE_ID) ? "OK" : "(sin configurar aún)");
   console.log("Backend del chatbot en marcha, puerto " + PORT);
+  suscribirWABA();
 });
