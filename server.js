@@ -245,14 +245,14 @@ app.post("/admin/api/importar", requireAdmin, async (req, res) => {
   }
 
   // 3) La IA extrae la información estructurada
-  const instru = `Eres un asistente que configura chatbots de atención al cliente. Te doy el TEXTO de la página web de un negocio. Devuelve SOLO un objeto JSON válido (sin explicaciones, sin markdown) con esta forma EXACTA:
-{"negocio":"","subtitulo":"Asistente virtual","bienvenida":"","whatsapp":"","chips":["","",""],"info":""}
+  const instru = `Eres un experto configurando chatbots de atención al cliente. Te doy el TEXTO real de la página web de un negocio. Analízalo a fondo y devuelve SOLO un objeto JSON válido (sin explicaciones, sin markdown) con esta forma EXACTA:
+{"negocio":"","subtitulo":"Asistente virtual","bienvenida":"","whatsapp":"","chips":["","","",""],"info":""}
 Reglas:
-- "negocio": el nombre del negocio.
-- "bienvenida": un saludo corto y cálido del asistente (1-2 frases).
-- "whatsapp": si aparece un número, ponlo solo con dígitos y código de país. Si no hay, deja "".
-- "chips": 3 preguntas frecuentes cortas que haría un cliente típico de ese negocio.
-- "info": base de conocimiento en TEXTO PLANO con lo que encuentres (NEGOCIO, SERVICIOS Y PRECIOS, HORARIOS, UBICACIÓN, CONTACTO y datos útiles). NO inventes precios ni horarios que no estén en el texto; incluye solo lo real.
+- "negocio": el nombre exacto del negocio tal como aparece en la web.
+- "bienvenida": un saludo corto, cálido y natural del asistente que mencione el negocio (1-2 frases).
+- "whatsapp": si aparece un número de teléfono/WhatsApp, ponlo solo con dígitos y código de país (ej: 5939...). Si no hay, deja "".
+- "chips": EXACTAMENTE 4 preguntas frecuentes, cortas y CONCRETAS, basadas en los servicios, productos o temas REALES que encontraste en ESTA web (no genéricas). Piensa qué preguntaría de verdad un cliente de este negocio en particular. Ej: si venden cortes de cabello, "¿Cuánto cuesta un corte?"; si es un restaurante, "¿Tienen menú vegetariano?".
+- "info": base de conocimiento COMPLETA y DETALLADA en TEXTO PLANO. Incluye TODO lo útil que encuentres, organizado y claro: NEGOCIO (qué es y a qué se dedica), SERVICIOS Y PRECIOS, PRODUCTOS, HORARIOS, UBICACIÓN, FORMAS DE PAGO, PROMOCIONES, CONTACTO, PREGUNTAS FRECUENTES y cualquier dato relevante. Sé exhaustivo con lo que SÍ está en el texto, pero NO inventes precios, horarios ni datos que no aparezcan.
 TEXTO DE LA WEB:
 ${texto}`;
 
@@ -266,7 +266,7 @@ ${texto}`;
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5",
-        max_tokens: 1500,
+        max_tokens: 2500,
         messages: [{ role: "user", content: instru }]
       })
     });
