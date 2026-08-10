@@ -1,5 +1,5 @@
 /* ==================================================================
-   server.js  ·  BACKEND (Nivel 2)  —  VERSIÓN CON DIAGNÓSTICO
+   server.js  ·  BACKEND (Nivel 2)  —  VERSIÓN LIMPIA
    Hace 3 cosas:
      1) sirve el widget.js
      2) entrega la configuración de cada cliente  (GET /config)
@@ -24,6 +24,7 @@ app.use((req, res, next) => {
 
 /* ==================================================================
    "BASE DE DATOS" DE CLIENTES
+   Para dar de alta un cliente nuevo: copia una entrada y cambia sus datos.
    ================================================================== */
 const CLIENTES = {
   "taller123": {
@@ -73,30 +74,23 @@ app.get("/widget.js", (req, res) => {
 app.get("/config", (req, res) => {
   const c = CLIENTES[req.query.cliente];
   if (!c) return res.status(404).json({ error: "cliente no encontrado" });
-  const { info, ...publico } = c;
+  const { info, ...publico } = c;   // NO enviamos la base de conocimiento al navegador
   res.json(publico);
 });
 
 /* ============ 3) Chat: aquí se usa la API KEY en secreto ============ */
 app.post("/chat", async (req, res) => {
-  // 🔎 DIAGNÓSTICO: qué llegó exactamente desde el widget
-  console.log("➡️  POST /chat recibido. body =", JSON.stringify(req.body));
-
-  // Aceptamos tanto "messages" (array) como "message" (texto suelto),
-  // por si el widget envía uno u otro. Así no falla por el nombre del campo.
+  // Aceptamos "messages" (array) o "message" (texto suelto), por robustez.
   let { cliente, messages, message } = req.body || {};
   if (!messages && message) {
     messages = [{ role: "user", content: String(message) }];
   }
 
   const c = CLIENTES[cliente];
-  if (!c) {
-    console.log("⚠️  Cliente no encontrado:", cliente);
-    return res.status(404).json({ error: "cliente no encontrado" });
-  }
+  if (!c) return res.status(404).json({ error: "cliente no encontrado" });
+
   if (!Array.isArray(messages) || messages.length === 0) {
-    console.log("⚠️  No llegaron mensajes válidos. messages =", JSON.stringify(messages));
-    return res.status(400).json({ text: "DEBUG: el widget no envió ningún mensaje (revisa que mande 'messages' o 'message')." });
+    return res.json({ text: "¿Me repites tu mensaje, por favor? No alcancé a leerlo." });
   }
 
   const sistema = construirSistema(c);
@@ -119,25 +113,27 @@ app.post("/chat", async (req, res) => {
 
     const data = await r.json();
 
-    // 🔎 DIAGNÓSTICO: si la API respondió con error, lo mostramos entero
+    // Si Anthropic devuelve error: lo registramos en el servidor (no en pantalla)
+    // y respondemos al cliente con un mensaje amable.
     if (!r.ok || data.error) {
-      console.error("❌ ERROR de la API de Anthropic. status =", r.status);
-      console.error("❌ Respuesta completa:", JSON.stringify(data));
-      // Mientras depuramos, devolvemos el error real al bot para verlo en pantalla:
-      const msg = data.error ? (data.error.message || data.error.type) : ("HTTP " + r.status);
-      return res.status(200).json({ text: "DEBUG (error de la IA): " + msg });
+      console.error("❌ Error de la API de Anthropic. status =", r.status, "|", JSON.stringify(data));
+      return res.json({
+        text: "Disculpa, estoy teniendo un problema técnico en este momento. Por favor escríbenos por WhatsApp al " + c.whatsapp + " y te atendemos enseguida. 🙏"
+      });
     }
 
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
 
     if (!text) {
-      console.error("⚠️  La API respondió OK pero sin texto. Respuesta:", JSON.stringify(data));
+      console.error("⚠️ La API respondió OK pero sin texto:", JSON.stringify(data));
     }
 
-    res.json({ text: text || "Disculpa, no pude procesar eso." });
+    res.json({ text: text || "Disculpa, no pude procesar eso. ¿Puedes reformular tu pregunta?" });
   } catch (e) {
     console.error("💥 Excepción al contactar la IA:", e);
-    res.status(500).json({ text: "DEBUG (excepción): " + e.message });
+    res.json({
+      text: "Disculpa, estoy teniendo un problema técnico en este momento. Por favor escríbenos por WhatsApp al " + c.whatsapp + " y te atendemos enseguida. 🙏"
+    });
   }
 });
 
@@ -146,6 +142,7 @@ function construirSistema(c) {
   return `Eres el asistente virtual de atención al cliente de "${c.negocio}".
 PERSONALIDAD: cálido, cercano y natural, como una persona real amable. Respuestas BREVES y claras.
 IDIOMA: responde en el mismo idioma en que te escriban. Si el cliente da su nombre, recuérdalo y úsalo.
+FORMATO: escribe en TEXTO PLANO, como en un chat de WhatsApp. NO uses Markdown: nada de asteriscos para negrita (**), ni almohadillas (#), ni guiones ni números para listas. Si necesitas enfatizar algo, hazlo con las palabras, no con símbolos.
 Usa ÚNICAMENTE la información de abajo. Si preguntan algo que no está, dilo con honestidad y ofrece el WhatsApp. Nunca inventes precios ni horarios.
 --- INFORMACIÓN DEL NEGOCIO ---
 ${c.info}
@@ -157,7 +154,6 @@ ${c.agendarActivo ? `AGENDAR CITAS: pide de a poco (uno por mensaje): 1) nombre,
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  // 🔎 DIAGNÓSTICO al arrancar: ¿existe la API key? (sin revelarla entera)
   const k = process.env.ANTHROPIC_API_KEY;
   if (!k) {
     console.log("🚨 ATENCIÓN: la variable ANTHROPIC_API_KEY NO está definida.");
