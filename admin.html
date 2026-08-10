@@ -77,6 +77,7 @@
     <div class="bar">
       <h2 id="vistaTitulo">Tus clientes</h2>
       <button class="btn sec" id="btnCitas" onclick="verCitas()">📅 Citas</button>
+      <button class="btn sec" id="btnLeads" onclick="verLeads()">🎯 Leads</button>
       <button class="btn" onclick="openForm()">+ Nuevo cliente</button>
     </div>
     <div id="lista"></div>
@@ -193,7 +194,14 @@
 
   function logout(){ PASS=""; location.reload(); }
 
+  function resetBotones(){
+    const bc = document.getElementById("btnCitas");
+    bc.textContent = "📅 Citas"; bc.onclick = verCitas;
+    const bl = document.getElementById("btnLeads");
+    bl.textContent = "🎯 Leads"; bl.onclick = verLeads;
+  }
   async function verCitas(){
+    resetBotones();
     document.getElementById("vistaTitulo").textContent = "Citas agendadas por el bot";
     const b = document.getElementById("btnCitas");
     b.textContent = "← Volver a clientes"; b.onclick = volverClientes;
@@ -213,10 +221,31 @@
       });
     }catch(e){ lista.innerHTML = "<p style='color:#DC2626'>Error al cargar citas: "+e.message+"</p>"; }
   }
+  async function verLeads(){
+    resetBotones();
+    document.getElementById("vistaTitulo").textContent = "Prospectos captados por el bot";
+    const b = document.getElementById("btnLeads");
+    b.textContent = "← Volver a clientes"; b.onclick = volverClientes;
+    const lista = document.getElementById("lista");
+    lista.innerHTML = "Cargando...";
+    try{
+      const leads = await api("GET","/admin/api/leads");
+      if(!leads.length){ lista.innerHTML = "<p style='color:#8A82AD'>Aún no hay prospectos captados. Cuando un visitante deje su nombre y teléfono, aparecerá aquí.</p>"; return; }
+      lista.innerHTML = "";
+      leads.forEach(ld=>{
+        const tel = String(ld.telefono||"").replace(/\D/g,"");
+        const div = document.createElement("div");
+        div.className = "card";
+        div.innerHTML = `<div style="font-size:22px">🎯</div>
+          <div class="info"><h3>${escapeHtml(ld.nombre||"(sin nombre)")} · ${tel?`<a href="https://wa.me/${tel}" target="_blank" style="color:#16a34a">${escapeHtml(ld.telefono)}</a>`:"(sin teléfono)"}</h3>
+          <span>Interés: ${escapeHtml(ld.interes||"-")} · Negocio: ${escapeHtml(ld.cliente_id||"")} · vía ${escapeHtml(ld.canal||"web")} · ${new Date(ld.creado_en).toLocaleString()}</span></div>`;
+        lista.appendChild(div);
+      });
+    }catch(e){ lista.innerHTML = "<p style='color:#DC2626'>Error al cargar leads: "+e.message+"</p>"; }
+  }
   function volverClientes(){
+    resetBotones();
     document.getElementById("vistaTitulo").textContent = "Tus clientes";
-    const b = document.getElementById("btnCitas");
-    b.textContent = "📅 Citas"; b.onclick = verCitas;
     cargar();
   }
 
