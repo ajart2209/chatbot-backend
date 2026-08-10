@@ -120,6 +120,67 @@ async function guardarLead(c, texto, canal) {
   }
 }
 
+// Registro ligero de mensajes atendidos (para los reportes al dueño)
+function logMensaje(clienteId, canal) {
+  fetch(`${SB_URL}/rest/v1/mensajes_log`, {
+    method: "POST",
+    headers: sbHeaders({ "Prefer": "return=minimal" }),
+    body: JSON.stringify({ cliente_id: clienteId, canal: canal || "web" })
+  }).catch(() => {});
+}
+
+// Cuenta registros de una tabla para un cliente desde una fecha
+async function contarDesde(tabla, clienteId, desdeISO) {
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/${tabla}?cliente_id=eq.${encodeURIComponent(clienteId)}&creado_en=gte.${desdeISO}&select=id`, {
+      headers: sbHeaders({ "Prefer": "count=exact", "Range-Unit": "items", "Range": "0-0" })
+    });
+    const cr = r.headers.get("content-range");
+    if (cr && cr.includes("/")) return parseInt(cr.split("/")[1]) || 0;
+  } catch (_) {}
+  return 0;
+}
+
+/* ============ REPORTES AUTOMÁTICOS AL DUEÑO (por WhatsApp) ============
+   La frecuencia se elige por cliente desde el panel: diario, cada 3 días,
+   semanal o mensual. El sistema revisa cada hora quién tiene reporte
+   pendiente y se lo envía a su WhatsApp. */
+const FREQ_DIAS = { diario: 1, cada3dias: 3, semanal: 7, mensual: 30 };
+
+async function enviarReporte(c, dias) {
+  const desde = new Date(Date.now() - dias * 86400000).toISOString();
+  const mensajes = await contarDesde("mensajes_log", c.cliente_id, desde);
+  const citas = await contarDesde("citas", c.cliente_id, desde);
+  const leads = await contarDesde("leads", c.cliente_id, desde);
+  const periodo = dias === 1 ? "últimas 24 horas" : `últimos ${dias} días`;
+  const texto = `📊 Reporte de tu asistente — ${c.negocio}\n\nEn las ${periodo}:\n💬 Mensajes atendidos: ${mensajes}\n📅 Citas agendadas: ${citas}\n🎯 Prospectos captados: ${leads}\n\nTu asistente trabaja 24/7 por tu negocio. 🤖`;
+  await enviarWhatsApp(String(c.whatsapp).replace(/\D/g, ""), texto, c.wa_phone_id || WA_PHONE_ID);
+  console.log("📊 Reporte enviado a", c.cliente_id);
+}
+
+async function revisarReportes() {
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/clientes?select=*`, { headers: sbHeaders() });
+    if (!r.ok) return;
+    const clientes = await r.json();
+    const ahora = Date.now();
+    for (const c of clientes) {
+      const dias = FREQ_DIAS[c.reporte_frecuencia];
+      if (!dias || !c.whatsapp) continue;
+      const ultimo = c.ultimo_reporte ? new Date(c.ultimo_reporte).getTime() : 0;
+      if (ahora - ultimo < dias * 86400000) continue;
+      await enviarReporte(c, dias);
+      await fetch(`${SB_URL}/rest/v1/clientes?cliente_id=eq.${encodeURIComponent(c.cliente_id)}`, {
+        method: "PATCH",
+        headers: sbHeaders({ "Prefer": "return=minimal" }),
+        body: JSON.stringify({ ultimo_reporte: new Date().toISOString() })
+      });
+    }
+  } catch (e) {
+    console.error("💥 Error revisando reportes:", e);
+  }
+}
+
 // Memoria de conversaciones de WhatsApp en Supabase (sobrevive a los redeploys)
 async function cargarHistWA(clave) {
   try {
@@ -221,7 +282,7 @@ app.post("/chat", async (req, res) => {
     }
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
     if (!text) console.error("⚠️ La API respondió OK pero sin texto:", JSON.stringify(data));
-    if (text) { guardarCita(c, text, "web"); guardarLead(c, text, "web"); } // 📅🎯 guardar cita/lead si los hay
+    if (text) { guardarCita(c, text, "web"); guardarLead(c, text, "web"); logMensaje(c.cliente_id, "web"); } // 📅🎯📊
     const limpio = text.replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim(); // el LEAD es interno, no se muestra
     res.json({ text: limpio || "Disculpa, no pude procesar eso. ¿Puedes reformular tu pregunta?" });
   } catch (e) {
@@ -271,7 +332,8 @@ app.post("/admin/api/clientes", requireAdmin, async (req, res) => {
     chips: Array.isArray(b.chips) ? b.chips : [],
     agendar_activo: b.agendar_activo !== false,
     info: b.info || "",
-    wa_phone_id: b.wa_phone_id ? String(b.wa_phone_id).trim() : null
+    wa_phone_id: b.wa_phone_id ? String(b.wa_phone_id).trim() : null,
+    reporte_frecuencia: b.reporte_frecuencia || "nunca"
   };
 
   const r = await fetch(`${SB_URL}/rest/v1/clientes`, {
@@ -529,6 +591,7 @@ app.post("/webhook", async (req, res) => {
     guardarHistWA(key, hist);                          // 🧠 guardar memoria
     guardarCita(c, out, "whatsapp");                   // 📅 si agendó cita, guardarla + avisar al dueño
     guardarLead(c, out, "whatsapp");                   // 🎯 si captó un prospecto, guardarlo
+    logMensaje(c.cliente_id, "whatsapp");              // 📊 contar para el reporte
     // quitar etiquetas internas antes de enviar
     out = out.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim();
 
@@ -617,4 +680,6 @@ app.listen(PORT, () => {
   console.log("💬 WhatsApp:", (WA_TOKEN && WA_PHONE_ID) ? "OK" : "(sin configurar aún)");
   console.log("Backend del chatbot en marcha, puerto " + PORT);
   suscribirWABA();
+  setTimeout(revisarReportes, 60000);      // primera revisión al minuto de arrancar
+  setInterval(revisarReportes, 3600000);   // y luego cada hora
 });
