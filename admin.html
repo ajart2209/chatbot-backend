@@ -138,6 +138,15 @@
     <label>ID del número de WhatsApp <span class="hint">(phone_number_id de Meta — llénalo solo si este cliente atiende por WhatsApp)</span></label>
     <input id="f_waphone" placeholder="Ej: 1270589532803418">
 
+    <label>Reporte automático al dueño <span class="hint">(resumen por WhatsApp con mensajes, citas y prospectos del período)</span></label>
+    <select id="f_reporte">
+      <option value="nunca">No enviar</option>
+      <option value="diario">Cada día</option>
+      <option value="cada3dias">Cada 3 días</option>
+      <option value="semanal">Cada semana</option>
+      <option value="mensual">Cada mes</option>
+    </select>
+
     <div style="background:#F5F2FF;border:1px solid #E2DBF5;border-radius:12px;padding:14px;margin-bottom:14px">
       <label style="margin-bottom:2px">📎 Adjuntar archivo (Excel, Word, PDF o TXT)</label>
       <div class="hint">Sube un archivo con datos (catálogo, precios, inventario…) y la IA lo lee y lo agrega a la información.</div>
@@ -285,6 +294,7 @@
     document.getElementById("f_chips").value = c&&c.chips?c.chips.join("\n"):"";
     document.getElementById("f_agendar").checked = c?c.agendar_activo!==false:true;
     document.getElementById("f_waphone").value = c?(c.wa_phone_id||""):"";
+    document.getElementById("f_reporte").value = c?(c.reporte_frecuencia||"nunca"):"nunca";
     document.getElementById("f_info").value = c?(c.info||""):"";
     document.getElementById("formMsg").textContent = "";
     updateEmbed();
@@ -383,6 +393,7 @@
       chips: document.getElementById("f_chips").value.split("\n").map(s=>s.trim()).filter(Boolean),
       agendar_activo: document.getElementById("f_agendar").checked,
       wa_phone_id: document.getElementById("f_waphone").value.trim(),
+      reporte_frecuencia: document.getElementById("f_reporte").value,
       info: document.getElementById("f_info").value.trim()
     };
     if(!body.cliente_id || !body.negocio){ document.getElementById("formMsg").textContent="El ID y el nombre del negocio son obligatorios."; return; }
