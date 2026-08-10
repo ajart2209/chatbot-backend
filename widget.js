@@ -8,19 +8,16 @@
   const me = document.currentScript;
   const CLIENTE = me.getAttribute("data-cliente") || "demo";
   const BACKEND = new URL(me.src).origin;
-
   if (!document.getElementById("cbw-font")) {
     const l = document.createElement("link"); l.id = "cbw-font"; l.rel = "stylesheet";
     l.href = "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap";
     document.head.appendChild(l);
   }
-
   fetch(`${BACKEND}/config?cliente=${encodeURIComponent(CLIENTE)}`)
     .then(r => r.json()).then(build)
     .catch(() => build({ negocio: "Asistente", subtitulo: "en línea",
       bienvenida: "¡Hola! ¿En qué te ayudo?", chips: [], whatsapp: "",
       bubble: "¡Hola! ¿Tienes alguna pregunta? 👋" }));
-
   const FLOAT = "cbFloat 3.6s ease-in-out infinite";
   const MOODS = {
     idle:      { ry:13, shift:"translate(0,0)",  mouth:"M92 122 q8 5 16 0",    mo:.5,  tint:"#8A70F8", anim:FLOAT, eye:"cbBlink 5.4s ease-in-out infinite" },
@@ -35,7 +32,6 @@
     confused:  { ry:12, shift:"translate(-4,0)", mouth:"M90 124 q6 6 11 0 q5 -6 11 0", mo:.7, tint:"#8A70F8", anim:"cbFloat 4s ease-in-out infinite", g2:"cbTilt 3s ease-in-out infinite", eye:"cbScan 4.2s ease-in-out infinite", brows:["M68 100 L88 93","M132 96 L112 96"] }
   };
   const MOODMAP = { feliz:"happy", neutral:"idle", triste:"sad", enojado:"angry", sorprendido:"surprised", confundido:"confused" };
-
   const puff = (x,y,r,d) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" opacity="0" style="animation:cbSteam 1.6s ${d}s ease-out infinite;transform-origin:${x}px ${y}px"/>`;
   const spark = (x,y,s,d) => `<path d="M${x} ${y-s} L${x+s*.32} ${y-s*.32} L${x+s} ${y} L${x+s*.32} ${y+s*.32} L${x} ${y+s} L${x-s*.32} ${y+s*.32} L${x-s} ${y} L${x-s*.32} ${y-s*.32} Z" fill="#FFE9A8" style="animation:cbSparkle 1.9s ${d}s ease-in-out infinite;transform-origin:${x}px ${y}px"/>`;
   const ring = (d,t) => `<circle cx="100" cy="110" r="64" fill="none" stroke="${t}" stroke-width="2.5" opacity="0" style="animation:cbRing 2.4s ${d}s ease-out infinite;transform-origin:100px 110px"/>`;
@@ -49,7 +45,6 @@
     if (mood === "surprised") return `<path d="M52 46 L44 34" stroke="${tint}" stroke-width="3.5" stroke-linecap="round" opacity=".75" style="animation:cbSparkle 1.4s ease-in-out infinite"/><path d="M148 46 L156 34" stroke="${tint}" stroke-width="3.5" stroke-linecap="round" opacity=".75" style="animation:cbSparkle 1.4s .2s ease-in-out infinite"/><path d="M100 34 L100 20" stroke="${tint}" stroke-width="3.5" stroke-linecap="round" opacity=".75" style="animation:cbSparkle 1.4s .1s ease-in-out infinite"/>`;
     return "";
   }
-
   function robotSVG(mood) {
     const F = MOODS[mood] || MOODS.idle, tint = F.tint, ry = F.ry;
     const eyeFill = (F.brows && (mood==="angry"||mood==="sad")) ? tint : "url(#wcore)";
@@ -96,13 +91,11 @@
       </g>
     </g></g></svg>`;
   }
-
   function build(CONF) {
     const chips = Array.isArray(CONF.chips) ? CONF.chips : String(CONF.chips||"").split(",").map(s=>s.trim()).filter(Boolean);
     const bubbleText = CONF.bubble || "¡Hola! ¿Tienes alguna pregunta? Estoy aquí para ayudarte 👋";
     const waLink = t => `https://wa.me/${CONF.whatsapp}?text=${encodeURIComponent(t||("Hola, escribo desde la web de "+CONF.negocio))}`;
     const winH = () => Math.round(Math.min(580, Math.max(360, window.innerHeight - 150)));
-
     const root = document.createElement("div"); root.id = "cbw"; document.body.appendChild(root);
     root.innerHTML = `<style>
       @keyframes cbFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
@@ -177,24 +170,20 @@
     </div>
     <div id="cbw-bub"><div style="font-size:13.5px;line-height:1.45;color:#3B3268;font-weight:600">${esc(bubbleText)}</div><div class="tip"></div></div>
     <button id="cbw-bot" aria-label="Abrir chat">${robotSVG("idle")}</button>`;
-
     const $ = s => root.querySelector(s);
     const bot=$("#cbw-bot"), win=$("#cbw-win"), m=$("#cbw-m"), inp=$("#cbw-i"), snd=$("#cbw-snd"), chipBox=$("#cbw-c");
     const hist=[]; let open=false, greeted=false, mood="idle", busy=false, moodTimer=null;
-
     function setMood(x){ mood=x; bot.innerHTML=robotSVG(x); }
     function reposBot(){ if(open){ const H=winH(); bot.style.right="calc(100% - 96px)"; bot.style.bottom=(H-110)+"px"; bot.style.width="88px"; bot.style.filter="drop-shadow(0 10px 16px rgba(20,8,70,.4))"; }
       else { bot.style.right="2px"; bot.style.bottom="0"; bot.style.width="132px"; bot.style.filter="drop-shadow(0 20px 28px rgba(76,49,214,.32))"; } }
     function setH(){ win.style.height=(open?winH():0)+"px"; }
     window.addEventListener("resize",()=>{ if(open){setH();reposBot();} });
-
     bot.onclick=()=>open?cerrar():abrir(); $("#cbw-x").onclick=cerrar;
     function abrir(){ open=true; root.classList.add("on"); setH(); reposBot();
       if(!greeted){ greeted=true; setMood("happy"); setTimeout(()=>typeBot(`${saludoHora()} ${CONF.bienvenida||""}`),350); } inp.focus(); }
     function cerrar(){ open=false; root.classList.remove("on"); setH(); reposBot(); setMood("idle"); }
     setTimeout(()=>{ if(!open){ setMood("greeting"); setTimeout(()=>{ if(!open)setMood("idle"); },2600);} },900);
-
-    function pintarChips(){ chipBox.innerHTML=""; if(open&&hist.length<4){ chips.forEach(t=>{const c=el("cbw-chip",t);c.onclick=()=>{chipBox.innerHTML="";enviar(t);};chipBox.appendChild(c);});
+    function pintarChips(){ chipBox.innerHTML=""; if(open&&hist.length===0){ chips.forEach(t=>{const c=el("cbw-chip",t);c.onclick=()=>{chipBox.innerHTML="";enviar(t);};chipBox.appendChild(c);});
       if(CONF.whatsapp){const w=el("cbw-chip wa","💬 Hablar con un asesor");w.onclick=()=>window.open(waLink(),"_blank");chipBox.appendChild(w);} } }
     function el(c,t){const d=document.createElement("div");d.className=c;if(t)d.textContent=t;return d;}
     function user(t){const d=el("cbw-u",t);m.appendChild(d);sc();}
@@ -202,12 +191,10 @@
     function cita(dt){const g="https://calendar.google.com/calendar/render?action=TEMPLATE&text="+encodeURIComponent(`${dt.servicio} — ${CONF.negocio}`)+"&details="+encodeURIComponent(`Cita de ${dt.nombre}\nServicio: ${dt.servicio}\nDía: ${dt.dia} · Hora: ${dt.hora}`);const d=el("cbw-cita");d.innerHTML=`<b>✅ Cita registrada</b><br>Cliente: ${esc(dt.nombre)}<br>Servicio: ${esc(dt.servicio)}<br>Día: ${esc(dt.dia)} · Hora: ${esc(dt.hora)}<br><a href="${g}" target="_blank">📅 Agregar a Google Calendar</a>`;m.appendChild(d);sc();}
     function typ(on){let e=$("#cbw-typ");if(on&&!e){e=el("cbw-typ");e.id="cbw-typ";e.innerHTML="<span></span><span></span><span></span>";m.appendChild(e);sc();}if(!on&&e)e.remove();}
     function sc(){m.scrollTop=m.scrollHeight;}
-
     inp.addEventListener("input",()=>{inp.style.height="auto";inp.style.height=Math.min(inp.scrollHeight,96)+"px";
       if(inp.value&&mood==="idle")setMood("listening"); if(!inp.value&&mood==="listening")setMood("idle");});
     inp.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();enviar(inp.value);}});
     snd.onclick=()=>enviar(inp.value);
-
     async function enviar(t){ t=(t||"").trim(); if(!t||busy)return; chipBox.innerHTML=""; user(t); inp.value=""; inp.style.height="auto";
       hist.push({role:"user",content:t}); busy=true; setMood("thinking"); typ(true);
       const lt=setTimeout(()=>setMood("loading"),1500);
@@ -224,7 +211,6 @@
       }catch(_){ clearTimeout(lt); busy=false; typ(false); setMood("sad"); typeBot("⚠️ Se cortó la conexión. Intenta de nuevo, por favor."); }
     }
   }
-
   function saludoHora(){ const h=new Date().getHours(); return h<12?"¡Buenos días! ☀️":h<19?"¡Buenas tardes! 👋":"¡Buenas noches! 🌙"; }
   function esc(s){return String(s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
 })();
