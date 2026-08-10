@@ -75,7 +75,8 @@
   </div>
   <div class="wrap">
     <div class="bar">
-      <h2>Tus clientes</h2>
+      <h2 id="vistaTitulo">Tus clientes</h2>
+      <button class="btn sec" id="btnCitas" onclick="verCitas()">📅 Citas</button>
       <button class="btn" onclick="openForm()">+ Nuevo cliente</button>
     </div>
     <div id="lista"></div>
@@ -191,6 +192,33 @@
   }
 
   function logout(){ PASS=""; location.reload(); }
+
+  async function verCitas(){
+    document.getElementById("vistaTitulo").textContent = "Citas agendadas por el bot";
+    const b = document.getElementById("btnCitas");
+    b.textContent = "← Volver a clientes"; b.onclick = volverClientes;
+    const lista = document.getElementById("lista");
+    lista.innerHTML = "Cargando...";
+    try{
+      const citas = await api("GET","/admin/api/citas");
+      if(!citas.length){ lista.innerHTML = "<p style='color:#8A82AD'>Aún no hay citas agendadas por el bot.</p>"; return; }
+      lista.innerHTML = "";
+      citas.forEach(ct=>{
+        const div = document.createElement("div");
+        div.className = "card";
+        div.innerHTML = `<div style="font-size:22px">📅</div>
+          <div class="info"><h3>${escapeHtml(ct.nombre||"(sin nombre)")} · ${escapeHtml(ct.servicio||"")}</h3>
+          <span>${escapeHtml(ct.dia||"")} a las ${escapeHtml(ct.hora||"")} · Negocio: ${escapeHtml(ct.cliente_id||"")} · vía ${escapeHtml(ct.canal||"web")} · ${new Date(ct.creado_en).toLocaleString()}</span></div>`;
+        lista.appendChild(div);
+      });
+    }catch(e){ lista.innerHTML = "<p style='color:#DC2626'>Error al cargar citas: "+e.message+"</p>"; }
+  }
+  function volverClientes(){
+    document.getElementById("vistaTitulo").textContent = "Tus clientes";
+    const b = document.getElementById("btnCitas");
+    b.textContent = "📅 Citas"; b.onclick = verCitas;
+    cargar();
+  }
 
   async function cargar(){
     const lista = document.getElementById("lista");
