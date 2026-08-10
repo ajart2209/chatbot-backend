@@ -11,6 +11,8 @@
   .top h1{font-size:19px;font-weight:800}
   .top .logout{margin-left:auto;background:rgba(255,255,255,.2);border:none;color:#fff;padding:8px 16px;border-radius:999px;cursor:pointer;font-weight:600;font-size:13px}
   .wrap{max-width:1000px;margin:0 auto;padding:26px}
+
+  /* Login */
   .login{max-width:380px;margin:80px auto;background:#fff;border-radius:20px;padding:34px;box-shadow:0 20px 50px rgba(76,49,214,.18);text-align:center}
   .login h2{font-size:22px;margin-bottom:6px}
   .login p{color:#777;font-size:14px;margin-bottom:22px}
@@ -22,9 +24,11 @@
   .btn.sec{background:#fff;color:#4C31D6;border:1.5px solid #D9CFF5;box-shadow:none}
   .btn.danger{background:#fff;color:#DC2626;border:1.5px solid #FBD5D5;box-shadow:none}
   .msg{font-size:13px;color:#DC2626;margin-bottom:10px;min-height:16px}
+
   .bar{display:flex;align-items:center;margin-bottom:20px;gap:12px}
   .bar h2{font-size:20px}
   .bar .btn{margin-left:auto}
+
   .card{background:#fff;border-radius:16px;padding:18px 20px;margin-bottom:14px;box-shadow:0 6px 18px rgba(76,49,214,.08);display:flex;align-items:center;gap:14px}
   .dot{width:14px;height:14px;border-radius:50%;flex-shrink:0}
   .card .info h3{font-size:16px}
@@ -32,6 +36,8 @@
   .card .acts{margin-left:auto;display:flex;gap:8px}
   .card .acts button{font-size:13px;padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:600;border:1.5px solid #E2DBF5;background:#fff;color:#4C31D6}
   .card .acts button.del{color:#DC2626;border-color:#FBD5D5}
+
+  /* Modal form */
   .overlay{position:fixed;inset:0;background:rgba(36,27,77,.45);display:none;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50}
   .overlay.show{display:flex}
   .modal{background:#fff;border-radius:20px;padding:26px;max-width:560px;width:100%;box-shadow:0 30px 70px rgba(0,0,0,.3)}
@@ -45,9 +51,13 @@
   .embed{background:#F5F2FF;border:1px solid #E2DBF5;border-radius:10px;padding:12px;font-size:12px;font-family:monospace;word-break:break-all;margin-bottom:8px;color:#4C31D6}
   .copied{color:#059669;font-size:12px;font-weight:700}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 </head>
 <body>
 
+<!-- LOGIN -->
 <div id="loginScreen" class="login">
   <h2>🔒 Panel de Admin</h2>
   <p>Ingresa tu contraseña de administrador</p>
@@ -56,6 +66,7 @@
   <button class="btn" style="width:100%" onclick="login()">Entrar</button>
 </div>
 
+<!-- APP -->
 <div id="app" style="display:none">
   <div class="top">
     <span style="font-size:22px">🤖</span>
@@ -71,6 +82,7 @@
   </div>
 </div>
 
+<!-- MODAL FORM -->
 <div class="overlay" id="overlay">
   <div class="modal">
     <h2 id="formTitle">Nuevo cliente</h2>
@@ -119,6 +131,14 @@
     <div class="chk">
       <input type="checkbox" id="f_agendar" checked>
       <label style="margin:0">Permitir agendar citas</label>
+    </div>
+
+    <div style="background:#F5F2FF;border:1px solid #E2DBF5;border-radius:12px;padding:14px;margin-bottom:14px">
+      <label style="margin-bottom:2px">📎 Adjuntar archivo (Excel, Word, PDF o TXT)</label>
+      <div class="hint">Sube un archivo con datos (catálogo, precios, inventario…) y la IA lo lee y lo agrega a la información.</div>
+      <input type="file" id="f_file" accept=".xlsx,.xls,.csv,.pdf,.docx,.txt" style="margin-bottom:8px">
+      <button class="btn sec" onclick="procesarArchivo()">Leer archivo y agregar</button>
+      <div class="msg" id="fileMsg" style="color:#4C31D6;margin-top:8px;margin-bottom:0"></div>
     </div>
 
     <label>Información del negocio (base de conocimiento)</label>
@@ -238,8 +258,10 @@
       const d = await api("POST","/admin/api/importar",{url});
       if(d.negocio) document.getElementById("f_negocio").value=d.negocio;
       if(d.subtitulo) document.getElementById("f_subtitulo").value=d.subtitulo;
+      if(d.color) document.getElementById("f_color").value=d.color;
       if(d.bienvenida) document.getElementById("f_bienvenida").value=d.bienvenida;
       if(d.whatsapp) document.getElementById("f_whatsapp").value=d.whatsapp;
+      if(typeof d.agendar_activo==="boolean") document.getElementById("f_agendar").checked=d.agendar_activo;
       if(Array.isArray(d.chips)&&d.chips.length) document.getElementById("f_chips").value=d.chips.filter(Boolean).join("\n");
       if(d.info) document.getElementById("f_info").value=d.info;
       msg.style.color="#059669"; msg.textContent="¡Listo! Revisa y completa lo que falte antes de guardar. ✓";
@@ -247,6 +269,46 @@
       msg.style.color="#DC2626"; msg.textContent="No se pudo importar: "+e.message;
     }
     btn.textContent=old; btn.disabled=false;
+  }
+
+  if(window.pdfjsLib){ pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; }
+
+  async function extraerTextoArchivo(file){
+    const n = file.name.toLowerCase();
+    if(n.endsWith(".txt")||n.endsWith(".csv")) return await file.text();
+    if(n.endsWith(".xlsx")||n.endsWith(".xls")){
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf,{type:"array"});
+      let t=""; wb.SheetNames.forEach(s=>{ t += "Hoja: "+s+"\n"+XLSX.utils.sheet_to_csv(wb.Sheets[s])+"\n\n"; }); return t;
+    }
+    if(n.endsWith(".docx")){
+      const buf = await file.arrayBuffer();
+      const r = await mammoth.extractRawText({arrayBuffer:buf}); return r.value;
+    }
+    if(n.endsWith(".pdf")){
+      const buf = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+      let t=""; for(let i=1;i<=pdf.numPages;i++){ const p=await pdf.getPage(i); const c=await p.getTextContent(); t += c.items.map(x=>x.str).join(" ")+"\n"; } return t;
+    }
+    throw new Error("Formato no soportado (usa Excel, Word, PDF o TXT).");
+  }
+
+  async function procesarArchivo(){
+    const inp = document.getElementById("f_file");
+    const msg = document.getElementById("fileMsg");
+    const file = inp.files[0];
+    if(!file){ msg.style.color="#DC2626"; msg.textContent="Elige un archivo primero."; return; }
+    msg.style.color="#4C31D6"; msg.textContent="Leyendo el archivo, espera... ⏳";
+    try{
+      const texto = await extraerTextoArchivo(file);
+      if(!texto || texto.trim().length<5) throw new Error("El archivo no tiene texto legible (¿es una imagen escaneada?).");
+      const d = await api("POST","/admin/api/procesar-archivo",{texto, nombre:file.name});
+      const infoEl = document.getElementById("f_info");
+      infoEl.value = (infoEl.value.trim()? infoEl.value.trim()+"\n\n":"") + "--- DATOS DE "+file.name+" ---\n" + (d.texto||"");
+      msg.style.color="#059669"; msg.textContent="¡Listo! Se agregó la info del archivo. Revísala abajo. ✓";
+    }catch(e){
+      msg.style.color="#DC2626"; msg.textContent="No se pudo: "+e.message;
+    }
   }
 
   async function save(){
