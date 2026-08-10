@@ -120,6 +120,33 @@ async function guardarLead(c, texto, canal) {
   }
 }
 
+// Guarda cada mensaje de la conversación (transcripciones para el panel)
+function logConv(clienteId, visitante, canal, rol, texto) {
+  fetch(`${SB_URL}/rest/v1/conversaciones`, {
+    method: "POST",
+    headers: sbHeaders({ "Prefer": "return=minimal" }),
+    body: JSON.stringify({
+      cliente_id: clienteId,
+      visitante: String(visitante || "").slice(0, 60),
+      canal: canal || "web",
+      rol: rol,
+      texto: String(texto || "").slice(0, 4000)
+    })
+  }).catch(() => {});
+}
+
+// ¿El dueño/asesor tomó el control de esta conversación? (bot en pausa)
+async function chatPausado(clave) {
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/chats_estado?clave=eq.${encodeURIComponent(clave)}&select=pausado`, { headers: sbHeaders() });
+    if (r.ok) {
+      const f = await r.json();
+      return !!(f[0] && f[0].pausado);
+    }
+  } catch (_) {}
+  return false;
+}
+
 // Registro ligero de mensajes atendidos (para los reportes al dueño)
 function logMensaje(clienteId, canal) {
   fetch(`${SB_URL}/rest/v1/mensajes_log`, {
@@ -238,7 +265,7 @@ app.get("/config", async (req, res) => {
 
 /* ============ 3) Chat: aquí se usa la API KEY en secreto ============ */
 app.post("/chat", async (req, res) => {
-  let { cliente, messages, message } = req.body || {};
+  let { cliente, messages, message, sid } = req.body || {};
   if (!messages && message) messages = [{ role: "user", content: String(message) }];
 
   // Anti-abuso: máx 20 mensajes por minuto por visitante
@@ -258,6 +285,16 @@ app.post("/chat", async (req, res) => {
     role: m && m.role === "assistant" ? "assistant" : "user",
     content: String((m && m.content) || "").slice(0, 2000)
   }));
+
+  // Transcripción: guardar el mensaje del visitante
+  const visitante = String(sid || ("ip_" + ip)).slice(0, 60);
+  const ultimoMsg = messages[messages.length - 1];
+  if (ultimoMsg && ultimoMsg.role === "user") logConv(cliente, visitante, "web", "user", ultimoMsg.content);
+
+  // ¿Un asesor humano tomó el control? → el bot no responde
+  if (await chatPausado(cliente + "_" + visitante)) {
+    return res.json({ humano: true });
+  }
 
   const sistema = construirSistema(c);
   try {
@@ -284,10 +321,27 @@ app.post("/chat", async (req, res) => {
     if (!text) console.error("⚠️ La API respondió OK pero sin texto:", JSON.stringify(data));
     if (text) { guardarCita(c, text, "web"); guardarLead(c, text, "web"); logMensaje(c.cliente_id, "web"); } // 📅🎯📊
     const limpio = text.replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim(); // el LEAD es interno, no se muestra
+    const paraLog = limpio.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").trim();
+    if (paraLog) logConv(cliente, visitante, "web", "bot", paraLog); // transcripción
     res.json({ text: limpio || "Disculpa, no pude procesar eso. ¿Puedes reformular tu pregunta?" });
   } catch (e) {
     console.error("💥 Excepción al contactar la IA:", e);
     res.json({ text: "Disculpa, estoy teniendo un problema técnico en este momento. Por favor escríbenos por WhatsApp al " + (c.whatsapp || "") + " y te atendemos enseguida. 🙏" });
+  }
+});
+
+/* ==== Mensajes nuevos del asesor para el widget (bandeja en vivo) ==== */
+app.get("/chat/nuevos", async (req, res) => {
+  try {
+    const { cliente, sid, desde } = req.query;
+    if (!cliente || !sid) return res.json({ mensajes: [], pausado: false });
+    const visitante = String(sid).slice(0, 60);
+    const d = desde || new Date(Date.now() - 3600000).toISOString();
+    const r = await fetch(`${SB_URL}/rest/v1/conversaciones?cliente_id=eq.${encodeURIComponent(cliente)}&visitante=eq.${encodeURIComponent(visitante)}&rol=eq.asesor&creado_en=gt.${encodeURIComponent(d)}&select=texto,creado_en&order=creado_en.asc&limit=20`, { headers: sbHeaders() });
+    const data = r.ok ? await r.json() : [];
+    res.json({ mensajes: data, pausado: await chatPausado(cliente + "_" + visitante) });
+  } catch (_) {
+    res.json({ mensajes: [], pausado: false });
   }
 });
 
@@ -333,7 +387,9 @@ app.post("/admin/api/clientes", requireAdmin, async (req, res) => {
     agendar_activo: b.agendar_activo !== false,
     info: b.info || "",
     wa_phone_id: b.wa_phone_id ? String(b.wa_phone_id).trim() : null,
-    reporte_frecuencia: b.reporte_frecuencia || "nunca"
+    reporte_frecuencia: b.reporte_frecuencia || "nunca",
+    fb_page_id: b.fb_page_id ? String(b.fb_page_id).trim() : null,
+    fb_page_token: b.fb_page_token ? String(b.fb_page_token).trim() : null
   };
 
   const r = await fetch(`${SB_URL}/rest/v1/clientes`, {
@@ -367,6 +423,55 @@ app.get("/admin/api/citas", requireAdmin, async (req, res) => {
   const data = await r.json();
   if (!r.ok) return res.status(500).json({ error: "no se pudo leer las citas" });
   res.json(data);
+});
+
+// Bandeja: lista de conversaciones recientes
+app.get("/admin/api/chats", requireAdmin, async (req, res) => {
+  const r = await fetch(`${SB_URL}/rest/v1/conversaciones?select=cliente_id,visitante,canal,rol,texto,creado_en&order=creado_en.desc&limit=600`, { headers: sbHeaders() });
+  const data = await r.json();
+  if (!r.ok) return res.status(500).json({ error: "no se pudo leer las conversaciones" });
+  res.json(data);
+});
+
+// Bandeja: mensajes de una conversación + estado de pausa
+app.get("/admin/api/chats/mensajes", requireAdmin, async (req, res) => {
+  const { cliente_id, visitante } = req.query;
+  if (!cliente_id || !visitante) return res.status(400).json({ error: "faltan datos" });
+  const r = await fetch(`${SB_URL}/rest/v1/conversaciones?cliente_id=eq.${encodeURIComponent(cliente_id)}&visitante=eq.${encodeURIComponent(visitante)}&select=rol,texto,canal,creado_en&order=creado_en.asc&limit=300`, { headers: sbHeaders() });
+  const data = await r.json();
+  if (!r.ok) return res.status(500).json({ error: "no se pudo leer" });
+  res.json({ mensajes: data, pausado: await chatPausado(cliente_id + "_" + visitante) });
+});
+
+// Bandeja: responder como asesor humano (se envía por el canal correspondiente)
+app.post("/admin/api/chats/responder", requireAdmin, async (req, res) => {
+  const { cliente_id, visitante, canal, texto } = req.body || {};
+  if (!cliente_id || !visitante || !texto) return res.status(400).json({ error: "faltan datos" });
+  logConv(cliente_id, visitante, canal || "web", "asesor", texto);
+  try {
+    if (canal === "whatsapp") {
+      const c = await getCliente(cliente_id);
+      await enviarWhatsApp(String(visitante).replace(/\D/g, ""), texto, (c && c.wa_phone_id) || WA_PHONE_ID);
+    } else if (canal === "messenger") {
+      const c = await getCliente(cliente_id);
+      if (c && c.fb_page_token) await enviarMessenger(c.fb_page_token, visitante, texto);
+    }
+    // canal web: el widget lo recoge solo con /chat/nuevos
+  } catch (e) { console.error("⚠️ Error enviando respuesta de asesor:", e.message); }
+  res.json({ ok: true });
+});
+
+// Bandeja: pausar o reactivar el bot en una conversación
+app.post("/admin/api/chats/pausa", requireAdmin, async (req, res) => {
+  const { cliente_id, visitante, pausado } = req.body || {};
+  if (!cliente_id || !visitante) return res.status(400).json({ error: "faltan datos" });
+  const r = await fetch(`${SB_URL}/rest/v1/chats_estado`, {
+    method: "POST",
+    headers: sbHeaders({ "Prefer": "resolution=merge-duplicates,return=minimal" }),
+    body: JSON.stringify({ clave: cliente_id + "_" + visitante, pausado: !!pausado, actualizado_en: new Date().toISOString() })
+  });
+  if (!r.ok) return res.status(500).json({ error: "no se pudo cambiar el estado" });
+  res.json({ ok: true, pausado: !!pausado });
 });
 
 // Listar los prospectos (leads) captados por el bot (para el panel)
@@ -550,6 +655,9 @@ app.get("/webhook", (req, res) => {
 app.post("/webhook", async (req, res) => {
   res.sendStatus(200); // responder rápido a Meta
   try {
+    // ¿Es un mensaje de Messenger (página de Facebook)? → su propio manejador
+    if (req.body && req.body.object === "page") return manejarMessenger(req.body);
+
     const value = req.body && req.body.entry && req.body.entry[0] &&
       req.body.entry[0].changes && req.body.entry[0].changes[0] &&
       req.body.entry[0].changes[0].value;
@@ -568,6 +676,10 @@ app.post("/webhook", async (req, res) => {
     let c = await getClientePorWaPhone(phoneId);
     if (!c && WA_CLIENTE) c = await getCliente(WA_CLIENTE);
     if (!c) { console.error("⚠️ Ningún cliente asociado al número de WhatsApp:", phoneId); return; }
+
+    logConv(c.cliente_id, from, "whatsapp", "user", texto); // transcripción
+    // ¿Un asesor humano tomó el control? → el bot no responde
+    if (await chatPausado(c.cliente_id + "_" + from)) { console.log("👤 Chat en manos del asesor:", from); return; }
 
     const key = phoneId + "_" + from; // memoria separada por número-de-negocio y por usuario
     let hist = await cargarHistWA(key); // 🧠 memoria en Supabase: sobrevive a los redeploys
@@ -594,6 +706,7 @@ app.post("/webhook", async (req, res) => {
     logMensaje(c.cliente_id, "whatsapp");              // 📊 contar para el reporte
     // quitar etiquetas internas antes de enviar
     out = out.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim();
+    logConv(c.cliente_id, from, "whatsapp", "bot", out); // transcripción
 
     await enviarWhatsApp(from, out, phoneId);
   } catch (e) {
@@ -614,6 +727,82 @@ async function enviarWhatsApp(to, texto, phoneId) {
     if (!r.ok) console.error("❌ Error enviando WhatsApp:", r.status, await r.text());
   } catch (e) {
     console.error("💥 Excepción enviando WhatsApp:", e);
+  }
+}
+
+/* ==================================================================
+   MESSENGER (páginas de Facebook) — mismo cerebro, otro canal
+   Cada cliente con Messenger guarda en el panel: fb_page_id y fb_page_token
+   ================================================================== */
+async function getClientePorCampo(campo, valor) {
+  if (!valor) return null;
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/clientes?${campo}=eq.${encodeURIComponent(valor)}&select=*`, { headers: sbHeaders() });
+    if (!r.ok) return null;
+    const filas = await r.json();
+    return filas[0] || null;
+  } catch (_) { return null; }
+}
+
+async function enviarMessenger(pageToken, to, texto) {
+  try {
+    const r = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(pageToken)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipient: { id: to }, messaging_type: "RESPONSE", message: { text: String(texto).slice(0, 1900) } })
+    });
+    if (!r.ok) console.error("❌ Error enviando Messenger:", r.status, await r.text());
+  } catch (e) { console.error("💥 Excepción enviando Messenger:", e); }
+}
+
+async function manejarMessenger(body) {
+  try {
+    const entry = body.entry && body.entry[0];
+    const ev = entry && entry.messaging && entry.messaging[0];
+    if (!ev || !ev.message || !ev.message.text || ev.message.is_echo) return;
+    const pageId = String(entry.id);
+    const from = String(ev.sender.id);
+    const texto = ev.message.text;
+    console.log("➡️ Messenger recibido en página", pageId, "de", from, ":", texto);
+
+    if (!permitir("ms_" + from, 15)) { console.log("🛑 Rate limit Messenger:", from); return; }
+
+    const c = await getClientePorCampo("fb_page_id", pageId);
+    if (!c) { console.error("⚠️ Ninguna empresa asociada a la página de Facebook:", pageId); return; }
+    if (!c.fb_page_token) { console.error("⚠️ El cliente", c.cliente_id, "no tiene fb_page_token configurado."); return; }
+
+    logConv(c.cliente_id, from, "messenger", "user", texto); // transcripción
+    if (await chatPausado(c.cliente_id + "_" + from)) { console.log("👤 Chat en manos del asesor (Messenger):", from); return; }
+
+    const key = "ms_" + c.cliente_id + "_" + from;
+    let hist = await cargarHistWA(key); // reutilizamos la memoria persistente
+    hist.push({ role: "user", content: String(texto).slice(0, 2000) });
+    if (hist.length > 20) hist = hist.slice(-20);
+
+    const sistema = construirSistema(c);
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1000, system: sistema, messages: hist })
+    });
+    const data = await r.json();
+    let out = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+    if (!out) out = "Disculpa, no pude procesar eso. ¿Puedes repetir?";
+    hist.push({ role: "assistant", content: out });
+    guardarHistWA(key, hist);
+    guardarCita(c, out, "messenger");
+    guardarLead(c, out, "messenger");
+    logMensaje(c.cliente_id, "messenger");
+    out = out.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim();
+    logConv(c.cliente_id, from, "messenger", "bot", out); // transcripción
+
+    await enviarMessenger(c.fb_page_token, from, out);
+  } catch (e) {
+    console.error("💥 Error en Messenger:", e);
   }
 }
 
