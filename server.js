@@ -182,6 +182,110 @@ app.delete("/admin/api/clientes", requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Importar datos automáticamente leyendo la web del cliente
+app.post("/admin/api/importar", requireAdmin, async (req, res) => {
+  let { url } = req.body || {};
+  if (!url) return res.status(400).json({ error: "Falta la URL" });
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+
+  let texto = "";
+
+  // 1a) OPCIÓN PRO: "navegador robot en la nube" (Firecrawl) -> lee CUALQUIER web,
+  //     incluso las que cargan con JavaScript (Wix, apps web, etc.).
+  //     Se activa sola si existe la variable FIRECRAWL_API_KEY en Railway.
+  if (process.env.FIRECRAWL_API_KEY) {
+    try {
+      const fr = await fetch("https://api.firecrawl.dev/v1/scrape", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + process.env.FIRECRAWL_API_KEY
+        },
+        body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true })
+      });
+      const fd = await fr.json();
+      if (fr.ok && fd.data && fd.data.markdown) {
+        texto = fd.data.markdown;
+      } else {
+        console.error("⚠️ Firecrawl no devolvió contenido:", JSON.stringify(fd).slice(0, 300));
+      }
+    } catch (e) {
+      console.error("💥 Excepción Firecrawl:", e);
+    }
+  }
+
+  // 1b) OPCIÓN BÁSICA (si no hay Firecrawl o falló): descargar el HTML crudo
+  if (!texto) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 15000);
+      const page = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; ChatbotBot/1.0)" }
+      });
+      clearTimeout(t);
+      if (!page.ok) return res.status(422).json({ error: "La página respondió con error " + page.status });
+      const html = await page.text();
+      texto = html
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&[a-z]+;/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    } catch (e) {
+      return res.status(422).json({ error: "No se pudo abrir esa página (revisa el link)." });
+    }
+  }
+
+  // 2) Limitar el tamaño del texto
+  texto = texto.slice(0, 12000);
+  if (texto.length < 60) {
+    return res.status(422).json({ error: "Esa web casi no tiene texto. Prueba activar Firecrawl o llena los datos a mano." });
+  }
+
+  // 3) La IA extrae la información estructurada
+  const instru = `Eres un asistente que configura chatbots de atención al cliente. Te doy el TEXTO de la página web de un negocio. Devuelve SOLO un objeto JSON válido (sin explicaciones, sin markdown) con esta forma EXACTA:
+{"negocio":"","subtitulo":"Asistente virtual","bienvenida":"","whatsapp":"","chips":["","",""],"info":""}
+Reglas:
+- "negocio": el nombre del negocio.
+- "bienvenida": un saludo corto y cálido del asistente (1-2 frases).
+- "whatsapp": si aparece un número, ponlo solo con dígitos y código de país. Si no hay, deja "".
+- "chips": 3 preguntas frecuentes cortas que haría un cliente típico de ese negocio.
+- "info": base de conocimiento en TEXTO PLANO con lo que encuentres (NEGOCIO, SERVICIOS Y PRECIOS, HORARIOS, UBICACIÓN, CONTACTO y datos útiles). NO inventes precios ni horarios que no estén en el texto; incluye solo lo real.
+TEXTO DE LA WEB:
+${texto}`;
+
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5",
+        max_tokens: 1500,
+        messages: [{ role: "user", content: instru }]
+      })
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) {
+      console.error("❌ Error IA al importar:", JSON.stringify(data));
+      return res.status(500).json({ error: "La IA no pudo procesar la página." });
+    }
+    let out = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+    const ini = out.indexOf("{"), fin = out.lastIndexOf("}");
+    if (ini === -1 || fin === -1) return res.status(500).json({ error: "No se pudo leer la respuesta de la IA." });
+    const obj = JSON.parse(out.slice(ini, fin + 1));
+    res.json(obj);
+  } catch (e) {
+    console.error("💥 Excepción al importar:", e);
+    res.status(500).json({ error: "Error al analizar la página." });
+  }
+});
+
 // Construye la "personalidad" + conocimiento del bot para cada cliente
 function construirSistema(c) {
   return `Eres el asistente virtual de atención al cliente de "${c.negocio}". Atiende como lo haría el MEJOR empleado del negocio: amable, resolutivo, y que ayuda a que el cliente compre o agende.
