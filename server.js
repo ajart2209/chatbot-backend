@@ -123,7 +123,8 @@ Usa ÚNICAMENTE la información de abajo. Si preguntan algo que no está, dilo c
 ${c.info}
 --- FIN ---
 ${c.agendarActivo ? `AGENDAR CITAS: pide de a poco (uno por mensaje): 1) nombre, 2) servicio, 3) día, 4) hora. Cuando tengas los cuatro, confirma y AL FINAL agrega EXACTAMENTE una línea:
-[CITA]{"nombre":"...","servicio":"...","dia":"...","hora":"..."}[/CITA]` : ""}`;
+[CITA]{"nombre":"...","servicio":"...","dia":"...","hora":"..."}[/CITA]
+` : ""}EMOCIÓN: termina SIEMPRE tu mensaje con una etiqueta oculta de tu estado de ánimo, en una línea aparte y con este formato exacto: [M:feliz] · [M:neutral] · [M:triste] · [M:enojado] · [M:sorprendido] · [M:confundido]. Usa "feliz" al saludar o dar buenas noticias, "confundido" si no entiendes, "triste" si no puedes ayudar, "sorprendido" ante algo inesperado. Nunca expliques la etiqueta.`;
 }
 
 const PORT = process.env.PORT || 3000;
