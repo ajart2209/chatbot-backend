@@ -246,13 +246,15 @@ app.post("/admin/api/importar", requireAdmin, async (req, res) => {
 
   // 3) La IA extrae la información estructurada
   const instru = `Eres un experto configurando chatbots de atención al cliente. Te doy el TEXTO real de la página web de un negocio. Analízalo a fondo y devuelve SOLO un objeto JSON válido (sin explicaciones, sin markdown) con esta forma EXACTA:
-{"negocio":"","subtitulo":"Asistente virtual","bienvenida":"","whatsapp":"","chips":["","","",""],"info":""}
+{"negocio":"","subtitulo":"Asistente virtual","color":"#6C4BF6","bienvenida":"","whatsapp":"","agendar_activo":true,"chips":["","","",""],"info":""}
 Reglas:
 - "negocio": el nombre exacto del negocio tal como aparece en la web.
+- "color": un color en formato hex (#RRGGBB) que combine con la marca o el rubro del negocio. Si detectas un color de marca úsalo; si no, elige uno apropiado para ese tipo de negocio.
 - "bienvenida": un saludo corto, cálido y natural del asistente que mencione el negocio (1-2 frases).
 - "whatsapp": si aparece un número de teléfono/WhatsApp, ponlo solo con dígitos y código de país (ej: 5939...). Si no hay, deja "".
-- "chips": EXACTAMENTE 4 preguntas frecuentes, cortas y CONCRETAS, basadas en los servicios, productos o temas REALES que encontraste en ESTA web (no genéricas). Piensa qué preguntaría de verdad un cliente de este negocio en particular. Ej: si venden cortes de cabello, "¿Cuánto cuesta un corte?"; si es un restaurante, "¿Tienen menú vegetariano?".
-- "info": base de conocimiento COMPLETA y DETALLADA en TEXTO PLANO. Incluye TODO lo útil que encuentres, organizado y claro: NEGOCIO (qué es y a qué se dedica), SERVICIOS Y PRECIOS, PRODUCTOS, HORARIOS, UBICACIÓN, FORMAS DE PAGO, PROMOCIONES, CONTACTO, PREGUNTAS FRECUENTES y cualquier dato relevante. Sé exhaustivo con lo que SÍ está en el texto, pero NO inventes precios, horarios ni datos que no aparezcan.
+- "agendar_activo": true SOLO si este tipo de negocio normalmente agenda citas o reservas (peluquería, barbería, spa, taller mecánico, clínica, consultorio, restaurante con reservas). false si es una tienda o comercio que vende productos sin cita (ferretería, tienda de pinturas, ropa, farmacia, etc.).
+- "chips": EXACTAMENTE 4 preguntas frecuentes, cortas y CONCRETAS, basadas en los servicios, productos o temas REALES que encontraste en ESTA web (no genéricas). Piensa qué preguntaría de verdad un cliente de este negocio. Ej: si venden cortes de cabello, "¿Cuánto cuesta un corte?"; si es un restaurante, "¿Tienen menú vegetariano?".
+- "info": base de conocimiento COMPLETA y DETALLADA en TEXTO PLANO. Incluye TODO lo útil que encuentres, organizado y claro: NEGOCIO (qué es y a qué se dedica), PRODUCTOS Y/O SERVICIOS, PRECIOS, HORARIOS, DIRECCIÓN Y SUCURSALES, FORMAS DE PAGO, ENVÍOS O DELIVERY, PROMOCIONES, CONTACTO, PREGUNTAS FRECUENTES y cualquier dato relevante. Sé exhaustivo con lo que SÍ está en el texto, pero NO inventes precios, horarios ni datos que no aparezcan.
 TEXTO DE LA WEB:
 ${texto}`;
 
@@ -283,6 +285,43 @@ ${texto}`;
   } catch (e) {
     console.error("💥 Excepción al importar:", e);
     res.status(500).json({ error: "Error al analizar la página." });
+  }
+});
+
+// Procesar el texto de un archivo adjunto y organizarlo para la base de conocimiento
+app.post("/admin/api/procesar-archivo", requireAdmin, async (req, res) => {
+  const { texto, nombre } = req.body || {};
+  if (!texto || String(texto).trim().length < 5) {
+    return res.status(400).json({ error: "El archivo no tiene texto legible." });
+  }
+  const recorte = String(texto).slice(0, 15000);
+  const instru = `Te doy el contenido de un archivo llamado "${nombre || "archivo"}" que pertenece a un negocio. Organízalo en TEXTO PLANO claro y ordenado para la base de conocimiento de un chatbot de atención al cliente. Agrupa por temas (productos, precios, servicios, horarios, políticas, etc.), quita el ruido y lo irrelevante, y NO inventes nada que no esté. Devuelve SOLO el texto organizado, sin explicaciones ni markdown.
+CONTENIDO DEL ARCHIVO:
+${recorte}`;
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5",
+        max_tokens: 2500,
+        messages: [{ role: "user", content: instru }]
+      })
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) {
+      console.error("❌ Error IA al procesar archivo:", JSON.stringify(data));
+      return res.status(500).json({ error: "La IA no pudo procesar el archivo." });
+    }
+    const out = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+    res.json({ texto: out });
+  } catch (e) {
+    console.error("💥 Excepción procesar-archivo:", e);
+    res.status(500).json({ error: "Error al procesar el archivo." });
   }
 });
 
