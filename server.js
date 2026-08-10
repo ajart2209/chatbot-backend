@@ -1,19 +1,20 @@
 /* ==================================================================
-   server.js  ·  BACKEND (Nivel 2)  —  VERSIÓN LIMPIA
+   server.js  ·  BACKEND (Nivel 3 - paso 1)
+   Ahora los clientes viven en SUPABASE (base de datos), no en el código.
    Hace 3 cosas:
      1) sirve el widget.js
-     2) entrega la configuración de cada cliente  (GET /config)
-     3) atiende el chat usando TU API KEY en secreto (POST /chat)
-   La API key NUNCA está en el código: se lee de una variable de entorno.
-   Requiere Node 18+ (trae fetch incluido).  Instalar:  npm install express
-   Ejecutar:  ANTHROPIC_API_KEY=tu_clave  node server.js
+     2) entrega la config de cada cliente  (GET /config)  -> desde Supabase
+     3) atiende el chat usando TU API KEY   (POST /chat)   -> desde Supabase
+   Variables de entorno necesarias (en Railway):
+     ANTHROPIC_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY
+   Requiere Node 18+ (trae fetch incluido).
    ================================================================== */
 const express = require("express");
 const path = require("path");
 const app = express();
 app.use(express.json());
 
-// --- Permitir que cualquier web de tus clientes llame al backend (CORS) ---
+// --- CORS: permitir que cualquier web de tus clientes llame al backend ---
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Content-Type");
@@ -22,47 +23,32 @@ app.use((req, res, next) => {
   next();
 });
 
-/* ==================================================================
-   "BASE DE DATOS" DE CLIENTES
-   Para dar de alta un cliente nuevo: copia una entrada y cambia sus datos.
-   ================================================================== */
-const CLIENTES = {
-  "taller123": {
-    negocio: "Taller AutoExperto",
-    subtitulo: "Asistente virtual",
-    color: "#0F766E",
-    whatsapp: "593991234567",
-    bienvenida: "Soy el asistente de Taller AutoExperto 👋 Puedo resolver tus dudas o ayudarte a agendar una cita. ¿En qué te ayudo?",
-    chips: ["¿Qué servicios ofrecen?", "¿Cuál es el horario?", "Quiero agendar una cita"],
-    agendarActivo: true,
-    info: `
-      NEGOCIO: Taller AutoExperto — mecánica automotriz.
-      HORARIOS: Lun-Vie 8:00–18:00; Sáb 8:00–13:00. Domingo cerrado.
-      UBICACIÓN: Av. Principal 123, sector Norte. Hay parqueo.
-      CONTACTO: WhatsApp 099 123 4567.
-      SERVICIOS Y PRECIOS: Cambio de aceite desde $35; Frenos (pastillas) desde $45;
-        Alineación y balanceo $30; Diagnóstico (scanner) $20; Suspensión desde $25;
-        Mantenimiento preventivo desde $80.
-      GARANTÍA: 3 meses o 5.000 km. PAGOS: efectivo, transferencia y tarjeta.
-    `
-  },
-  "dental456": {
-    negocio: "Clínica Dental Sonrisa",
-    subtitulo: "Asistente virtual",
-    color: "#2563EB",
-    whatsapp: "593987654321",
-    bienvenida: "¡Hola! Soy el asistente de Clínica Dental Sonrisa 😁 ¿Tienes dudas o quieres agendar tu cita?",
-    chips: ["¿Qué tratamientos hacen?", "¿Cuánto cuesta una limpieza?", "Quiero una cita"],
-    agendarActivo: true,
-    info: `
-      NEGOCIO: Clínica Dental Sonrisa.
-      HORARIOS: Lun-Vie 9:00–19:00; Sáb 9:00–14:00.
-      SERVICIOS: Limpieza dental $25; Resina (calza) desde $30; Ortodoncia (brackets) desde $600;
-        Blanqueamiento $120; Extracción desde $40; Valoración inicial gratis.
-      CONTACTO: WhatsApp 098 765 4321.
-    `
+/* ================= Conexión a Supabase ================= */
+const SB_URL = process.env.SUPABASE_URL;
+const SB_KEY = process.env.SUPABASE_SERVICE_KEY;
+
+// Trae un cliente de la base de datos por su cliente_id (o null si no existe)
+async function getCliente(id) {
+  if (!id) return null;
+  try {
+    const url = `${SB_URL}/rest/v1/clientes?cliente_id=eq.${encodeURIComponent(id)}&select=*`;
+    const r = await fetch(url, {
+      headers: {
+        "apikey": SB_KEY,
+        "Authorization": "Bearer " + SB_KEY
+      }
+    });
+    if (!r.ok) {
+      console.error("❌ Error consultando Supabase. status =", r.status, "|", await r.text());
+      return null;
+    }
+    const filas = await r.json();
+    return filas[0] || null;
+  } catch (e) {
+    console.error("💥 Excepción consultando Supabase:", e);
+    return null;
   }
-};
+}
 
 /* ================= 1) Servir el widget universal ================= */
 app.get("/widget.js", (req, res) => {
@@ -71,22 +57,29 @@ app.get("/widget.js", (req, res) => {
 });
 
 /* ============ 2) Config pública de un cliente (sin secretos) ============ */
-app.get("/config", (req, res) => {
-  const c = CLIENTES[req.query.cliente];
+app.get("/config", async (req, res) => {
+  const c = await getCliente(req.query.cliente);
   if (!c) return res.status(404).json({ error: "cliente no encontrado" });
-  const { info, ...publico } = c;   // NO enviamos la base de conocimiento al navegador
-  res.json(publico);
+  // Enviamos SOLO lo público (nunca el campo 'info' al navegador).
+  res.json({
+    negocio: c.negocio,
+    subtitulo: c.subtitulo,
+    color: c.color,
+    whatsapp: c.whatsapp,
+    bienvenida: c.bienvenida,
+    chips: c.chips || [],
+    agendarActivo: c.agendar_activo
+  });
 });
 
 /* ============ 3) Chat: aquí se usa la API KEY en secreto ============ */
 app.post("/chat", async (req, res) => {
-  // Aceptamos "messages" (array) o "message" (texto suelto), por robustez.
   let { cliente, messages, message } = req.body || {};
   if (!messages && message) {
     messages = [{ role: "user", content: String(message) }];
   }
 
-  const c = CLIENTES[cliente];
+  const c = await getCliente(cliente);
   if (!c) return res.status(404).json({ error: "cliente no encontrado" });
 
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -113,26 +106,21 @@ app.post("/chat", async (req, res) => {
 
     const data = await r.json();
 
-    // Si Anthropic devuelve error: lo registramos en el servidor (no en pantalla)
-    // y respondemos al cliente con un mensaje amable.
     if (!r.ok || data.error) {
       console.error("❌ Error de la API de Anthropic. status =", r.status, "|", JSON.stringify(data));
       return res.json({
-        text: "Disculpa, estoy teniendo un problema técnico en este momento. Por favor escríbenos por WhatsApp al " + c.whatsapp + " y te atendemos enseguida. 🙏"
+        text: "Disculpa, estoy teniendo un problema técnico en este momento. Por favor escríbenos por WhatsApp al " + (c.whatsapp || "") + " y te atendemos enseguida. 🙏"
       });
     }
 
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
-
-    if (!text) {
-      console.error("⚠️ La API respondió OK pero sin texto:", JSON.stringify(data));
-    }
+    if (!text) console.error("⚠️ La API respondió OK pero sin texto:", JSON.stringify(data));
 
     res.json({ text: text || "Disculpa, no pude procesar eso. ¿Puedes reformular tu pregunta?" });
   } catch (e) {
     console.error("💥 Excepción al contactar la IA:", e);
     res.json({
-      text: "Disculpa, estoy teniendo un problema técnico en este momento. Por favor escríbenos por WhatsApp al " + c.whatsapp + " y te atendemos enseguida. 🙏"
+      text: "Disculpa, estoy teniendo un problema técnico en este momento. Por favor escríbenos por WhatsApp al " + (c.whatsapp || "") + " y te atendemos enseguida. 🙏"
     });
   }
 });
@@ -145,20 +133,17 @@ IDIOMA: responde en el mismo idioma en que te escriban. Si el cliente da su nomb
 FORMATO: escribe en TEXTO PLANO, como en un chat de WhatsApp. NO uses Markdown: nada de asteriscos para negrita (**), ni almohadillas (#), ni guiones ni números para listas. Si necesitas enfatizar algo, hazlo con las palabras, no con símbolos.
 Usa ÚNICAMENTE la información de abajo. Si preguntan algo que no está, dilo con honestidad y ofrece el WhatsApp. Nunca inventes precios ni horarios.
 --- INFORMACIÓN DEL NEGOCIO ---
-${c.info}
+${c.info || "(sin información cargada todavía)"}
 --- FIN ---
-${c.agendarActivo ? `AGENDAR CITAS: pide de a poco (uno por mensaje): 1) nombre, 2) servicio, 3) día, 4) hora. Cuando tengas los cuatro, confirma y AL FINAL agrega EXACTAMENTE una línea:
+${c.agendar_activo ? `AGENDAR CITAS: pide de a poco (uno por mensaje): 1) nombre, 2) servicio, 3) día, 4) hora. Cuando tengas los cuatro, confirma y AL FINAL agrega EXACTAMENTE una línea:
 [CITA]{"nombre":"...","servicio":"...","dia":"...","hora":"..."}[/CITA]
 ` : ""}EMOCIÓN: termina SIEMPRE tu mensaje con una etiqueta oculta de tu estado de ánimo, en una línea aparte y con este formato exacto: [M:feliz] · [M:neutral] · [M:triste] · [M:enojado] · [M:sorprendido] · [M:confundido]. Usa "feliz" al saludar o dar buenas noticias, "confundido" si no entiendes, "triste" si no puedes ayudar, "sorprendido" ante algo inesperado. Nunca expliques la etiqueta.`;
 }
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  const k = process.env.ANTHROPIC_API_KEY;
-  if (!k) {
-    console.log("🚨 ATENCIÓN: la variable ANTHROPIC_API_KEY NO está definida.");
-  } else {
-    console.log("🔑 API key detectada. Longitud:", k.length, "| empieza con:", k.slice(0, 12) + "...");
-  }
+  console.log("🔑 API key Anthropic:", process.env.ANTHROPIC_API_KEY ? "OK" : "🚨 FALTA");
+  console.log("🗄️  Supabase URL:", SB_URL ? "OK" : "🚨 FALTA");
+  console.log("🗄️  Supabase KEY:", SB_KEY ? "OK" : "🚨 FALTA");
   console.log("Backend del chatbot en marcha, puerto " + PORT);
 });
