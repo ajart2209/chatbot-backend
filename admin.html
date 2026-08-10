@@ -76,6 +76,7 @@
   <div class="wrap">
     <div class="bar">
       <h2 id="vistaTitulo">Tus clientes</h2>
+      <button class="btn sec" id="btnChats" onclick="verChats()">💬 Chats</button>
       <button class="btn sec" id="btnCitas" onclick="verCitas()">📅 Citas</button>
       <button class="btn sec" id="btnLeads" onclick="verLeads()">🎯 Leads</button>
       <button class="btn" onclick="openForm()">+ Nuevo cliente</button>
@@ -137,6 +138,17 @@
 
     <label>ID del número de WhatsApp <span class="hint">(phone_number_id de Meta — llénalo solo si este cliente atiende por WhatsApp)</span></label>
     <input id="f_waphone" placeholder="Ej: 1270589532803418">
+
+    <div class="row2">
+      <div>
+        <label>ID de página de Facebook <span class="hint">(Messenger — opcional)</span></label>
+        <input id="f_fbpage" placeholder="Ej: 101234567890123">
+      </div>
+      <div>
+        <label>Token de página <span class="hint">(Messenger — opcional)</span></label>
+        <input id="f_fbtoken" placeholder="EAAG... (token de la página)">
+      </div>
+    </div>
 
     <label>Reporte automático al dueño <span class="hint">(resumen por WhatsApp con mensajes, citas y prospectos del período)</span></label>
     <select id="f_reporte">
@@ -203,11 +215,118 @@
 
   function logout(){ PASS=""; location.reload(); }
 
+  let chatTimer = null, chatActual = null, chatEstaPausado = false;
+  function pararTimerChat(){ if(chatTimer){ clearInterval(chatTimer); chatTimer = null; } }
   function resetBotones(){
+    pararTimerChat();
+    const bh = document.getElementById("btnChats");
+    bh.textContent = "💬 Chats"; bh.onclick = verChats;
     const bc = document.getElementById("btnCitas");
     bc.textContent = "📅 Citas"; bc.onclick = verCitas;
     const bl = document.getElementById("btnLeads");
     bl.textContent = "🎯 Leads"; bl.onclick = verLeads;
+  }
+
+  async function verChats(){
+    resetBotones();
+    document.getElementById("vistaTitulo").textContent = "Conversaciones";
+    const b = document.getElementById("btnChats");
+    b.textContent = "← Volver a clientes"; b.onclick = volverClientes;
+    const lista = document.getElementById("lista");
+    lista.innerHTML = "Cargando...";
+    try{
+      const data = await api("GET","/admin/api/chats");
+      if(!data.length){ lista.innerHTML = "<p style='color:#8A82AD'>Aún no hay conversaciones registradas.</p>"; return; }
+      const grupos = {};
+      data.forEach(msg=>{
+        const k = msg.cliente_id + "|" + msg.visitante + "|" + (msg.canal||"web");
+        if(!grupos[k]) grupos[k] = { cliente_id: msg.cliente_id, visitante: msg.visitante, canal: msg.canal||"web", ultimo: msg.texto, fecha: msg.creado_en, total: 0 };
+        grupos[k].total++;
+      });
+      lista.innerHTML = "";
+      Object.values(grupos).forEach(g=>{
+        const icono = g.canal==="whatsapp" ? "📱" : (g.canal==="messenger" ? "💙" : "🌐");
+        const div = document.createElement("div");
+        div.className = "card"; div.style.cursor = "pointer";
+        div.onclick = ()=>abrirChat(g.cliente_id, g.visitante, g.canal);
+        div.innerHTML = `<div style="font-size:22px">${icono}</div>
+          <div class="info"><h3>${escapeHtml(g.cliente_id)} · ${escapeHtml(g.visitante.slice(0,18))}</h3>
+          <span>"${escapeHtml(String(g.ultimo||"").slice(0,70))}" · ${g.total} mensajes · ${new Date(g.fecha).toLocaleString()}</span></div>
+          <div class="acts"><button>Abrir</button></div>`;
+        lista.appendChild(div);
+      });
+    }catch(e){ lista.innerHTML = "<p style='color:#DC2626'>Error al cargar chats: "+e.message+"</p>"; }
+  }
+
+  function abrirChat(cid, vis, canal){
+    chatActual = { cid, vis, canal };
+    document.getElementById("vistaTitulo").textContent = "Chat · " + cid;
+    const lista = document.getElementById("lista");
+    lista.innerHTML = `
+      <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn sec" onclick="verChats()">← Bandeja</button>
+        <button class="btn danger" id="btnPausa" onclick="togglePausa()">🙋 Tomar el control</button>
+        <span class="hint" id="estadoPausa" style="margin:0"></span>
+      </div>
+      <div id="chatMsgs" style="background:#fff;border:1px solid #E2DBF5;border-radius:14px;padding:14px;max-height:420px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:8px">
+        <input id="chatInput" placeholder="Escribe tu respuesta como asesor..." style="margin-bottom:0" onkeydown="if(event.key==='Enter')responderChat()">
+        <button class="btn" onclick="responderChat()">Enviar</button>
+      </div>`;
+    cargarMensajesChat();
+    chatTimer = setInterval(cargarMensajesChat, 5000);
+  }
+
+  async function cargarMensajesChat(){
+    if(!chatActual) return;
+    try{
+      const d = await api("GET", `/admin/api/chats/mensajes?cliente_id=${encodeURIComponent(chatActual.cid)}&visitante=${encodeURIComponent(chatActual.vis)}`);
+      chatEstaPausado = !!d.pausado;
+      const bp = document.getElementById("btnPausa");
+      const ep = document.getElementById("estadoPausa");
+      if(bp){ bp.textContent = chatEstaPausado ? "🤖 Devolver al bot" : "🙋 Tomar el control"; }
+      if(ep){ ep.textContent = chatEstaPausado ? "El bot está en pausa: tú respondes." : "El bot responde automáticamente."; ep.style.color = chatEstaPausado ? "#DC2626" : "#059669"; }
+      const box = document.getElementById("chatMsgs");
+      if(!box) return;
+      const abajo = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+      box.innerHTML = "";
+      (d.mensajes||[]).forEach(mm=>{
+        const div = document.createElement("div");
+        const esUser = mm.rol==="user";
+        const esAsesor = mm.rol==="asesor";
+        div.style.cssText = `max-width:75%;padding:9px 13px;border-radius:14px;font-size:13.5px;line-height:1.45;white-space:pre-wrap;`+
+          (esUser ? "align-self:flex-start;background:#F1F0F7;color:#241B4D;"
+           : esAsesor ? "align-self:flex-end;background:#D1FAE5;color:#065F46;"
+           : "align-self:flex-end;background:#EDE9FE;color:#3B2B84;");
+        div.textContent = (esUser?"":"" ) + mm.texto;
+        const et = document.createElement("div");
+        et.style.cssText = "font-size:10px;color:#9A93B8;margin-top:3px";
+        et.textContent = (esUser?"visitante":(esAsesor?"tú (asesor)":"bot")) + " · " + new Date(mm.creado_en).toLocaleTimeString();
+        div.appendChild(et);
+        box.appendChild(div);
+      });
+      if(abajo) box.scrollTop = box.scrollHeight;
+    }catch(_){}
+  }
+
+  async function responderChat(){
+    const inp = document.getElementById("chatInput");
+    const texto = (inp.value||"").trim();
+    if(!texto || !chatActual) return;
+    inp.value = "";
+    try{
+      if(!chatEstaPausado){ await api("POST","/admin/api/chats/pausa",{cliente_id:chatActual.cid, visitante:chatActual.vis, pausado:true}); }
+      await api("POST","/admin/api/chats/responder",{cliente_id:chatActual.cid, visitante:chatActual.vis, canal:chatActual.canal, texto});
+      cargarMensajesChat();
+    }catch(e){ alert("No se pudo enviar: "+e.message); }
+  }
+
+  async function togglePausa(){
+    if(!chatActual) return;
+    try{
+      await api("POST","/admin/api/chats/pausa",{cliente_id:chatActual.cid, visitante:chatActual.vis, pausado:!chatEstaPausado});
+      cargarMensajesChat();
+    }catch(e){ alert("No se pudo cambiar: "+e.message); }
   }
   async function verCitas(){
     resetBotones();
@@ -295,6 +414,8 @@
     document.getElementById("f_agendar").checked = c?c.agendar_activo!==false:true;
     document.getElementById("f_waphone").value = c?(c.wa_phone_id||""):"";
     document.getElementById("f_reporte").value = c?(c.reporte_frecuencia||"nunca"):"nunca";
+    document.getElementById("f_fbpage").value = c?(c.fb_page_id||""):"";
+    document.getElementById("f_fbtoken").value = c?(c.fb_page_token||""):"";
     document.getElementById("f_info").value = c?(c.info||""):"";
     document.getElementById("formMsg").textContent = "";
     updateEmbed();
@@ -394,6 +515,8 @@
       agendar_activo: document.getElementById("f_agendar").checked,
       wa_phone_id: document.getElementById("f_waphone").value.trim(),
       reporte_frecuencia: document.getElementById("f_reporte").value,
+      fb_page_id: document.getElementById("f_fbpage").value.trim(),
+      fb_page_token: document.getElementById("f_fbtoken").value.trim(),
       info: document.getElementById("f_info").value.trim()
     };
     if(!body.cliente_id || !body.negocio){ document.getElementById("formMsg").textContent="El ID y el nombre del negocio son obligatorios."; return; }
