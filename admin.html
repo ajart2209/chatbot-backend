@@ -133,6 +133,9 @@
       <label style="margin:0">Permitir agendar citas</label>
     </div>
 
+    <label>ID del número de WhatsApp <span class="hint">(phone_number_id de Meta — llénalo solo si este cliente atiende por WhatsApp)</span></label>
+    <input id="f_waphone" placeholder="Ej: 1270589532803418">
+
     <div style="background:#F5F2FF;border:1px solid #E2DBF5;border-radius:12px;padding:14px;margin-bottom:14px">
       <label style="margin-bottom:2px">📎 Adjuntar archivo (Excel, Word, PDF o TXT)</label>
       <div class="hint">Sube un archivo con datos (catálogo, precios, inventario…) y la IA lo lee y lo agrega a la información.</div>
@@ -224,6 +227,7 @@
     document.getElementById("f_bienvenida").value = c?(c.bienvenida||""):"";
     document.getElementById("f_chips").value = c&&c.chips?c.chips.join("\n"):"";
     document.getElementById("f_agendar").checked = c?c.agendar_activo!==false:true;
+    document.getElementById("f_waphone").value = c?(c.wa_phone_id||""):"";
     document.getElementById("f_info").value = c?(c.info||""):"";
     document.getElementById("formMsg").textContent = "";
     updateEmbed();
@@ -321,6 +325,7 @@
       bienvenida: document.getElementById("f_bienvenida").value.trim(),
       chips: document.getElementById("f_chips").value.split("\n").map(s=>s.trim()).filter(Boolean),
       agendar_activo: document.getElementById("f_agendar").checked,
+      wa_phone_id: document.getElementById("f_waphone").value.trim(),
       info: document.getElementById("f_info").value.trim()
     };
     if(!body.cliente_id || !body.negocio){ document.getElementById("formMsg").textContent="El ID y el nombre del negocio son obligatorios."; return; }
