@@ -8,6 +8,7 @@
   const me = document.currentScript;
   const CLIENTE = me.getAttribute("data-cliente") || "demo";
   const BACKEND = new URL(me.src).origin;
+  const SID = "w" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); // id del visitante
   if (!document.getElementById("cbw-font")) {
     const l = document.createElement("link"); l.id = "cbw-font"; l.rel = "stylesheet";
     l.href = "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap";
@@ -173,6 +174,7 @@
     const $ = s => root.querySelector(s);
     const bot=$("#cbw-bot"), win=$("#cbw-win"), m=$("#cbw-m"), inp=$("#cbw-i"), snd=$("#cbw-snd"), chipBox=$("#cbw-c");
     const hist=[]; let open=false, greeted=false, mood="idle", busy=false, moodTimer=null;
+    let humanoAviso=false, lastPoll=new Date().toISOString();
     function setMood(x){ mood=x; bot.innerHTML=robotSVG(x); }
     function reposBot(){ if(open){ const H=winH(); bot.style.right="calc(100% - 96px)"; bot.style.bottom=(H-110)+"px"; bot.style.width="88px"; bot.style.filter="drop-shadow(0 10px 16px rgba(20,8,70,.4))"; }
       else { bot.style.right="2px"; bot.style.bottom="0"; bot.style.width="132px"; bot.style.filter="drop-shadow(0 20px 28px rgba(76,49,214,.32))"; } }
@@ -199,8 +201,14 @@
       hist.push({role:"user",content:t}); busy=true; setMood("thinking"); typ(true);
       const lt=setTimeout(()=>setMood("loading"),1500);
       try{
-        const r=await fetch(`${BACKEND}/chat`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cliente:CLIENTE,messages:hist})});
-        const data=await r.json(); let out=(data.text||"Disculpa, no te entendí. ¿Puedes repetir? 🙏").trim();
+        const r=await fetch(`${BACKEND}/chat`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cliente:CLIENTE,messages:hist,sid:SID})});
+        const data=await r.json();
+        if(data.humano){ // un asesor humano tomó la conversación
+          clearTimeout(lt); busy=false; typ(false); setMood("idle");
+          if(!humanoAviso){ humanoAviso=true; typeBot("Un asesor de nuestro equipo continuará esta conversación en un momento 👤"); }
+          return;
+        }
+        let out=(data.text||"Disculpa, no te entendí. ¿Puedes repetir? 🙏").trim();
         hist.push({role:"assistant",content:out});
         const mt=out.match(/\[M:\s*([a-zá-úñ]+)\s*\]/i); if(mt)out=out.replace(/\[M:[^\]]*\]/gi,"").trim();
         let c=null; const cm=out.match(/\[CITA\]([\s\S]*?)\[\/CITA\]/); if(cm){try{c=JSON.parse(cm[1]);}catch(_){}; out=out.replace(/\[CITA\][\s\S]*?\[\/CITA\]/,"").trim();}
@@ -210,6 +218,23 @@
         if(moodTimer)clearTimeout(moodTimer); moodTimer=setTimeout(()=>{ if(!busy)setMood("idle"); },2600);
       }catch(_){ clearTimeout(lt); busy=false; typ(false); setMood("sad"); typeBot("⚠️ Se cortó la conexión. Intenta de nuevo, por favor."); }
     }
+
+    // 👤 Bandeja en vivo: cada 5s revisa si un asesor humano escribió algo
+    setInterval(async ()=>{
+      if(!open) return;
+      try{
+        const r = await fetch(`${BACKEND}/chat/nuevos?cliente=${encodeURIComponent(CLIENTE)}&sid=${SID}&desde=${encodeURIComponent(lastPoll)}`);
+        const d = await r.json();
+        (d.mensajes||[]).forEach(msj=>{
+          lastPoll = msj.creado_en;
+          const b = el("cbw-a","👤 "+msj.texto);
+          b.style.background = "#F0FDF4"; b.style.borderColor = "#BBF7D0";
+          m.appendChild(b); sc();
+          hist.push({role:"assistant", content: msj.texto});
+        });
+        if(d.pausado===false && humanoAviso){ humanoAviso=false; } // el bot volvió
+      }catch(_){}
+    }, 5000);
   }
   function saludoHora(){ const h=new Date().getHours(); return h<12?"¡Buenos días! ☀️":h<19?"¡Buenas tardes! 👋":"¡Buenas noches! 🌙"; }
   function esc(s){return String(s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
