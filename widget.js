@@ -164,7 +164,7 @@
       #cbw-snd{width:44px;height:44px;border-radius:50%;border:none;background:linear-gradient(135deg,#7C5CFA,#4C31D6);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 8px 18px rgba(76,49,214,.3)}
       #cbw-pie{text-align:center;font-size:11px;color:#A79FC8;padding:0 0 10px;background:#fff;font-weight:500}
       #cbw-bub{position:absolute;right:8px;bottom:126px;z-index:2;width:192px;background:#fff;border:1px solid #ECE7FB;border-radius:18px;padding:13px 16px;box-shadow:0 14px 34px rgba(43,22,120,.14);animation:cbBubbleIn .4s ease both;pointer-events:none;transition:opacity .25s,transform .25s}
-      #cbw.on #cbw-bub{opacity:0;transform:translateY(6px) scale(.96)}
+      #cbw.on #cbw-bub{opacity:0;transform:translateY(6px) scale(.96);visibility:hidden;pointer-events:none}
       #cbw-bub .tip{position:absolute;right:26px;bottom:-7px;width:14px;height:14px;background:#fff;transform:rotate(45deg);border-right:1px solid #ECE7FB;border-bottom:1px solid #ECE7FB}
       #cbw-bot{position:absolute;z-index:3;background:none;border:none;padding:0;cursor:pointer;pointer-events:auto;right:2px;bottom:0;width:132px;filter:drop-shadow(0 20px 28px rgba(76,49,214,.32));transition:right .5s cubic-bezier(.34,1.1,.4,1),bottom .5s cubic-bezier(.34,1.1,.4,1),width .5s cubic-bezier(.34,1.1,.4,1),filter .4s}
     </style>
