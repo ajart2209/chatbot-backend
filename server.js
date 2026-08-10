@@ -21,6 +21,21 @@ app.use((req, res, next) => {
   next();
 });
 
+/* ================= Límite de uso (anti-abuso) =================
+   Evita que alguien spamee el bot y gaste tu saldo de Anthropic.
+   Máximo N mensajes por minuto por visitante. */
+const RATE = {};
+function permitir(claveRate, max) {
+  const ahora = Date.now();
+  const r = RATE[claveRate];
+  if (!r || ahora > r.reset) { RATE[claveRate] = { n: 1, reset: ahora + 60000 }; return true; }
+  if (r.n >= (max || 20)) return false;
+  r.n++;
+  return true;
+}
+// limpieza periódica para no acumular memoria
+setInterval(() => { const ahora = Date.now(); for (const k in RATE) { if (ahora > RATE[k].reset) delete RATE[k]; } }, 300000);
+
 /* ================= Conexión a Supabase ================= */
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -50,6 +65,52 @@ async function getCliente(id) {
     console.error("💥 Excepción consultando Supabase:", e);
     return null;
   }
+}
+
+// Guarda una cita agendada por el bot en Supabase (para verla en el panel)
+async function guardarCita(clienteId, texto, canal) {
+  try {
+    const m = String(texto || "").match(/\[CITA\]([\s\S]*?)\[\/CITA\]/);
+    if (!m) return;
+    const d = JSON.parse(m[1]);
+    await fetch(`${SB_URL}/rest/v1/citas`, {
+      method: "POST",
+      headers: sbHeaders({ "Prefer": "return=minimal" }),
+      body: JSON.stringify({
+        cliente_id: clienteId,
+        nombre: d.nombre || "",
+        servicio: d.servicio || "",
+        dia: d.dia || "",
+        hora: d.hora || "",
+        canal: canal || "web"
+      })
+    });
+    console.log("📅 Cita guardada para", clienteId, "via", canal);
+  } catch (e) {
+    console.error("⚠️ No se pudo guardar la cita:", e.message);
+  }
+}
+
+// Memoria de conversaciones de WhatsApp en Supabase (sobrevive a los redeploys)
+async function cargarHistWA(clave) {
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/wa_conversaciones?clave=eq.${encodeURIComponent(clave)}&select=mensajes`, { headers: sbHeaders() });
+    if (r.ok) {
+      const f = await r.json();
+      if (f[0] && Array.isArray(f[0].mensajes)) return f[0].mensajes;
+    }
+  } catch (_) {}
+  return waHist[clave] ? waHist[clave].slice() : [];
+}
+async function guardarHistWA(clave, mensajes) {
+  waHist[clave] = mensajes; // respaldo en memoria por si Supabase falla
+  try {
+    await fetch(`${SB_URL}/rest/v1/wa_conversaciones`, {
+      method: "POST",
+      headers: sbHeaders({ "Prefer": "resolution=merge-duplicates,return=minimal" }),
+      body: JSON.stringify({ clave, mensajes, actualizado_en: new Date().toISOString() })
+    });
+  } catch (_) {}
 }
 
 // Trae un cliente por el phone_number_id de WhatsApp (para atender a MUCHOS clientes)
@@ -90,11 +151,23 @@ app.post("/chat", async (req, res) => {
   let { cliente, messages, message } = req.body || {};
   if (!messages && message) messages = [{ role: "user", content: String(message) }];
 
+  // Anti-abuso: máx 20 mensajes por minuto por visitante
+  const ip = String(req.headers["x-forwarded-for"] || req.ip || "?").split(",")[0].trim();
+  if (!permitir("web_" + ip, 20)) {
+    return res.json({ text: "Estás escribiendo muy rápido 🙏 Espera un momentito e intenta de nuevo." });
+  }
+
   const c = await getCliente(cliente);
   if (!c) return res.status(404).json({ error: "cliente no encontrado" });
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.json({ text: "¿Me repites tu mensaje, por favor? No alcancé a leerlo." });
   }
+
+  // Control de costos: solo los últimos 20 mensajes, cada uno recortado
+  messages = messages.slice(-20).map(m => ({
+    role: m && m.role === "assistant" ? "assistant" : "user",
+    content: String((m && m.content) || "").slice(0, 2000)
+  }));
 
   const sistema = construirSistema(c);
   try {
@@ -119,6 +192,7 @@ app.post("/chat", async (req, res) => {
     }
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
     if (!text) console.error("⚠️ La API respondió OK pero sin texto:", JSON.stringify(data));
+    if (text) guardarCita(cliente, text, "web"); // 📅 si el bot agendó una cita, la guardamos
     res.json({ text: text || "Disculpa, no pude procesar eso. ¿Puedes reformular tu pregunta?" });
   } catch (e) {
     console.error("💥 Excepción al contactar la IA:", e);
@@ -193,6 +267,14 @@ app.delete("/admin/api/clientes", requireAdmin, async (req, res) => {
   });
   if (!r.ok) return res.status(500).json({ error: "no se pudo borrar" });
   res.json({ ok: true });
+});
+
+// Listar las citas agendadas por el bot (para el panel)
+app.get("/admin/api/citas", requireAdmin, async (req, res) => {
+  const r = await fetch(`${SB_URL}/rest/v1/citas?select=*&order=creado_en.desc&limit=200`, { headers: sbHeaders() });
+  const data = await r.json();
+  if (!r.ok) return res.status(500).json({ error: "no se pudo leer las citas" });
+  res.json(data);
 });
 
 // Importar datos automáticamente leyendo la web del cliente
@@ -378,6 +460,9 @@ app.post("/webhook", async (req, res) => {
     const phoneId = (value.metadata && value.metadata.phone_number_id) || WA_PHONE_ID;
     console.log("➡️ WhatsApp recibido en", phoneId, "de", from, ":", texto);
 
+    // Anti-abuso: máx 15 mensajes por minuto por número
+    if (!permitir("wa_" + from, 15)) { console.log("🛑 Rate limit WhatsApp:", from); return; }
+
     // Identificar el cliente por el NÚMERO que recibió el mensaje (multi-cliente).
     // Si no hay coincidencia, se usa WHATSAPP_CLIENTE como respaldo (modo un solo cliente).
     let c = await getClientePorWaPhone(phoneId);
@@ -385,9 +470,9 @@ app.post("/webhook", async (req, res) => {
     if (!c) { console.error("⚠️ Ningún cliente asociado al número de WhatsApp:", phoneId); return; }
 
     const key = phoneId + "_" + from; // memoria separada por número-de-negocio y por usuario
-    if (!waHist[key]) waHist[key] = [];
-    waHist[key].push({ role: "user", content: texto });
-    if (waHist[key].length > 20) waHist[key] = waHist[key].slice(-20);
+    let hist = await cargarHistWA(key); // 🧠 memoria en Supabase: sobrevive a los redeploys
+    hist.push({ role: "user", content: String(texto).slice(0, 2000) });
+    if (hist.length > 20) hist = hist.slice(-20);
 
     const sistema = construirSistema(c);
     const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -397,12 +482,14 @@ app.post("/webhook", async (req, res) => {
         "x-api-key": process.env.ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01"
       },
-      body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1000, system: sistema, messages: waHist[key] })
+      body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1000, system: sistema, messages: hist })
     });
     const data = await r.json();
     let out = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
     if (!out) out = "Disculpa, no pude procesar eso. ¿Puedes repetir?";
-    waHist[key].push({ role: "assistant", content: out });
+    hist.push({ role: "assistant", content: out });
+    guardarHistWA(key, hist);                          // 🧠 guardar memoria
+    guardarCita(c.cliente_id, out, "whatsapp");        // 📅 si agendó cita, guardarla
     // quitar etiquetas internas antes de enviar
     out = out.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").trim();
 
