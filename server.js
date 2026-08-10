@@ -67,8 +67,8 @@ async function getCliente(id) {
   }
 }
 
-// Guarda una cita agendada por el bot en Supabase (para verla en el panel)
-async function guardarCita(clienteId, texto, canal) {
+// Guarda una cita agendada por el bot en Supabase + avisa al dueño por WhatsApp
+async function guardarCita(c, texto, canal) {
   try {
     const m = String(texto || "").match(/\[CITA\]([\s\S]*?)\[\/CITA\]/);
     if (!m) return;
@@ -77,7 +77,7 @@ async function guardarCita(clienteId, texto, canal) {
       method: "POST",
       headers: sbHeaders({ "Prefer": "return=minimal" }),
       body: JSON.stringify({
-        cliente_id: clienteId,
+        cliente_id: c.cliente_id,
         nombre: d.nombre || "",
         servicio: d.servicio || "",
         dia: d.dia || "",
@@ -85,9 +85,38 @@ async function guardarCita(clienteId, texto, canal) {
         canal: canal || "web"
       })
     });
-    console.log("📅 Cita guardada para", clienteId, "via", canal);
+    console.log("📅 Cita guardada para", c.cliente_id, "via", canal);
+
+    // 📲 Aviso instantáneo al dueño del negocio por WhatsApp
+    if (c.whatsapp && WA_TOKEN) {
+      const aviso = `📅 ¡Nueva cita agendada por tu asistente!\n\nCliente: ${d.nombre || "-"}\nServicio: ${d.servicio || "-"}\nDía: ${d.dia || "-"} a las ${d.hora || "-"}\n\n— Asistente de ${c.negocio}`;
+      enviarWhatsApp(String(c.whatsapp).replace(/\D/g, ""), aviso, c.wa_phone_id || WA_PHONE_ID);
+    }
   } catch (e) {
     console.error("⚠️ No se pudo guardar la cita:", e.message);
+  }
+}
+
+// Guarda un prospecto (lead) captado por el bot en Supabase
+async function guardarLead(c, texto, canal) {
+  try {
+    const m = String(texto || "").match(/\[LEAD\]([\s\S]*?)\[\/LEAD\]/);
+    if (!m) return;
+    const d = JSON.parse(m[1]);
+    await fetch(`${SB_URL}/rest/v1/leads`, {
+      method: "POST",
+      headers: sbHeaders({ "Prefer": "return=minimal" }),
+      body: JSON.stringify({
+        cliente_id: c.cliente_id,
+        nombre: d.nombre || "",
+        telefono: d.telefono || "",
+        interes: d.interes || "",
+        canal: canal || "web"
+      })
+    });
+    console.log("🎯 Lead guardado para", c.cliente_id, "via", canal);
+  } catch (e) {
+    console.error("⚠️ No se pudo guardar el lead:", e.message);
   }
 }
 
@@ -192,8 +221,9 @@ app.post("/chat", async (req, res) => {
     }
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
     if (!text) console.error("⚠️ La API respondió OK pero sin texto:", JSON.stringify(data));
-    if (text) guardarCita(cliente, text, "web"); // 📅 si el bot agendó una cita, la guardamos
-    res.json({ text: text || "Disculpa, no pude procesar eso. ¿Puedes reformular tu pregunta?" });
+    if (text) { guardarCita(c, text, "web"); guardarLead(c, text, "web"); } // 📅🎯 guardar cita/lead si los hay
+    const limpio = text.replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim(); // el LEAD es interno, no se muestra
+    res.json({ text: limpio || "Disculpa, no pude procesar eso. ¿Puedes reformular tu pregunta?" });
   } catch (e) {
     console.error("💥 Excepción al contactar la IA:", e);
     res.json({ text: "Disculpa, estoy teniendo un problema técnico en este momento. Por favor escríbenos por WhatsApp al " + (c.whatsapp || "") + " y te atendemos enseguida. 🙏" });
@@ -274,6 +304,14 @@ app.get("/admin/api/citas", requireAdmin, async (req, res) => {
   const r = await fetch(`${SB_URL}/rest/v1/citas?select=*&order=creado_en.desc&limit=200`, { headers: sbHeaders() });
   const data = await r.json();
   if (!r.ok) return res.status(500).json({ error: "no se pudo leer las citas" });
+  res.json(data);
+});
+
+// Listar los prospectos (leads) captados por el bot (para el panel)
+app.get("/admin/api/leads", requireAdmin, async (req, res) => {
+  const r = await fetch(`${SB_URL}/rest/v1/leads?select=*&order=creado_en.desc&limit=200`, { headers: sbHeaders() });
+  const data = await r.json();
+  if (!r.ok) return res.status(500).json({ error: "no se pudo leer los leads" });
   res.json(data);
 });
 
@@ -489,9 +527,10 @@ app.post("/webhook", async (req, res) => {
     if (!out) out = "Disculpa, no pude procesar eso. ¿Puedes repetir?";
     hist.push({ role: "assistant", content: out });
     guardarHistWA(key, hist);                          // 🧠 guardar memoria
-    guardarCita(c.cliente_id, out, "whatsapp");        // 📅 si agendó cita, guardarla
+    guardarCita(c, out, "whatsapp");                   // 📅 si agendó cita, guardarla + avisar al dueño
+    guardarLead(c, out, "whatsapp");                   // 🎯 si captó un prospecto, guardarlo
     // quitar etiquetas internas antes de enviar
-    out = out.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").trim();
+    out = out.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim();
 
     await enviarWhatsApp(from, out, phoneId);
   } catch (e) {
@@ -548,7 +587,10 @@ ${c.info || "(sin información cargada todavía)"}
 --- FIN ---
 ${c.whatsapp ? `WHATSAPP para derivar cuando haga falta: ${c.whatsapp}.\n` : ""}${c.agendar_activo ? `AGENDAR CITAS: cuando el cliente quiera una cita, pide los datos DE A POCO (uno por mensaje, no todos juntos): 1) nombre, 2) servicio, 3) día, 4) hora. Cuando tengas los cuatro, confírmalos en una frase y AL FINAL agrega EXACTAMENTE una línea con este formato (sin explicarla):
 [CITA]{"nombre":"...","servicio":"...","dia":"...","hora":"..."}[/CITA]
-` : ""}EMOCIÓN: termina SIEMPRE tu mensaje con una etiqueta oculta de tu estado de ánimo, en una línea aparte y con este formato exacto: [M:feliz] · [M:neutral] · [M:triste] · [M:enojado] · [M:sorprendido] · [M:confundido]. Usa "feliz" al saludar o dar buenas noticias, "neutral" para respuestas normales, "confundido" si no entiendes, "triste" si no puedes ayudar, "sorprendido" ante algo inesperado. Nunca expliques la etiqueta.`;
+` : ""}PROSPECTOS: si el visitante muestra interés real en comprar o contratar (pide cotización, precios para decidir, cómo comprar) y te da su NOMBRE y su NÚMERO DE TELÉFONO, agrega AL FINAL de tu mensaje EXACTAMENTE una línea con este formato (sin explicarla, y solo la primera vez que tengas ambos datos):
+[LEAD]{"nombre":"...","telefono":"...","interes":"breve descripción de lo que le interesa"}[/LEAD]
+No pidas los datos con insistencia ni condiciones la ayuda a que los dé; captúralos solo si el visitante los comparte con naturalidad. Si ya está agendando una cita formal, no agregues LEAD.
+EMOCIÓN: termina SIEMPRE tu mensaje con una etiqueta oculta de tu estado de ánimo, en una línea aparte y con este formato exacto: [M:feliz] · [M:neutral] · [M:triste] · [M:enojado] · [M:sorprendido] · [M:confundido]. Usa "feliz" al saludar o dar buenas noticias, "neutral" para respuestas normales, "confundido" si no entiendes, "triste" si no puedes ayudar, "sorprendido" ante algo inesperado. Nunca expliques la etiqueta.`;
 }
 
 // Suscribe la cuenta de WhatsApp (WABA) a esta app -> necesario para recibir mensajes REALES
