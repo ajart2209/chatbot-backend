@@ -261,7 +261,7 @@
         div.className="card";
         div.innerHTML = `
           <div class="dot" style="background:${c.color||'#6C4BF6'}"></div>
-          <div class="info"><h3>${escapeHtml(c.negocio)}</h3><span>ID: ${escapeHtml(c.cliente_id)}</span></div>
+          <div class="info"><h3>${escapeHtml(c.negocio)}</h3><span>ID: ${escapeHtml(c.cliente_id)} · ${c.wa_phone_id ? "🌐 Web + 📱 WhatsApp" : "🌐 Solo Web"}${c.agendar_activo!==false ? " · 📅 Citas" : ""}</span></div>
           <div class="acts">
             <button onclick='editar(${JSON.stringify(c.cliente_id)})'>Editar</button>
             <button class="del" onclick='borrar(${JSON.stringify(c.cliente_id)}, ${JSON.stringify(c.negocio)})'>Borrar</button>
