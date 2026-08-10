@@ -325,6 +325,89 @@ ${recorte}`;
   }
 });
 
+/* ==================================================================
+   WHATSAPP  (Meta Cloud API)  — el bot también atiende por WhatsApp
+   Variables en Railway:
+     WEBHOOK_VERIFY_TOKEN (una palabra secreta que tú inventas)
+     WHATSAPP_CLIENTE     (qué cliente atiende por WhatsApp, ej: taller123)
+     WHATSAPP_TOKEN       (token que da Meta)
+     WHATSAPP_PHONE_ID    (ID del número que da Meta)
+   ================================================================== */
+const WA_TOKEN = process.env.WHATSAPP_TOKEN;
+const WA_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
+const WA_VERIFY = process.env.WEBHOOK_VERIFY_TOKEN;
+const WA_CLIENTE = process.env.WHATSAPP_CLIENTE;
+const waHist = {}; // memoria de conversación por número de WhatsApp
+
+// 1) Verificación del webhook (Meta llama con GET la primera vez)
+app.get("/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+  if (mode === "subscribe" && token === WA_VERIFY) {
+    console.log("✅ Webhook de WhatsApp verificado.");
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
+});
+
+// 2) Recibir mensajes entrantes de WhatsApp
+app.post("/webhook", async (req, res) => {
+  res.sendStatus(200); // responder rápido a Meta
+  try {
+    const value = req.body && req.body.entry && req.body.entry[0] &&
+      req.body.entry[0].changes && req.body.entry[0].changes[0] &&
+      req.body.entry[0].changes[0].value;
+    const msg = value && value.messages && value.messages[0];
+    if (!msg || msg.type !== "text") return; // solo mensajes de texto
+    const from = msg.from;
+    const texto = msg.text.body;
+
+    const c = await getCliente(WA_CLIENTE);
+    if (!c) { console.error("⚠️ WHATSAPP_CLIENTE no existe en la base:", WA_CLIENTE); return; }
+
+    if (!waHist[from]) waHist[from] = [];
+    waHist[from].push({ role: "user", content: texto });
+    if (waHist[from].length > 20) waHist[from] = waHist[from].slice(-20);
+
+    const sistema = construirSistema(c);
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1000, system: sistema, messages: waHist[from] })
+    });
+    const data = await r.json();
+    let out = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+    if (!out) out = "Disculpa, no pude procesar eso. ¿Puedes repetir?";
+    waHist[from].push({ role: "assistant", content: out });
+    // quitar etiquetas internas antes de enviar
+    out = out.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").trim();
+
+    await enviarWhatsApp(from, out);
+  } catch (e) {
+    console.error("💥 Error en webhook de WhatsApp:", e);
+  }
+});
+
+// Enviar un mensaje de vuelta por WhatsApp
+async function enviarWhatsApp(to, texto) {
+  if (!WA_TOKEN || !WA_PHONE_ID) { console.error("🚨 Faltan WHATSAPP_TOKEN o WHATSAPP_PHONE_ID"); return; }
+  try {
+    const r = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_ID}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + WA_TOKEN },
+      body: JSON.stringify({ messaging_product: "whatsapp", to, type: "text", text: { body: texto } })
+    });
+    if (!r.ok) console.error("❌ Error enviando WhatsApp:", r.status, await r.text());
+  } catch (e) {
+    console.error("💥 Excepción enviando WhatsApp:", e);
+  }
+}
+
 // Construye la "personalidad" + conocimiento del bot para cada cliente
 function construirSistema(c) {
   return `Eres el asistente virtual de atención al cliente de "${c.negocio}". Atiende como lo haría el MEJOR empleado del negocio: amable, resolutivo, y que ayuda a que el cliente compre o agende.
@@ -367,5 +450,6 @@ app.listen(PORT, () => {
   console.log("🗄️  Supabase URL:", SB_URL ? "OK" : "🚨 FALTA");
   console.log("🗄️  Supabase KEY:", SB_KEY ? "OK" : "🚨 FALTA");
   console.log("🔒 Admin password:", ADMIN_PASS ? "OK" : "🚨 FALTA");
+  console.log("💬 WhatsApp:", (WA_TOKEN && WA_PHONE_ID) ? "OK" : "(sin configurar aún)");
   console.log("Backend del chatbot en marcha, puerto " + PORT);
 });
