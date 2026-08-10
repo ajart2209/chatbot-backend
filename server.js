@@ -52,6 +52,18 @@ async function getCliente(id) {
   }
 }
 
+// Trae un cliente por el phone_number_id de WhatsApp (para atender a MUCHOS clientes)
+async function getClientePorWaPhone(phoneId) {
+  if (!phoneId) return null;
+  try {
+    const url = `${SB_URL}/rest/v1/clientes?wa_phone_id=eq.${encodeURIComponent(phoneId)}&select=*`;
+    const r = await fetch(url, { headers: sbHeaders() });
+    if (!r.ok) return null;
+    const filas = await r.json();
+    return filas[0] || null;
+  } catch (e) { return null; }
+}
+
 /* ================= 1) Servir el widget universal ================= */
 app.get("/widget.js", (req, res) => {
   res.type("application/javascript");
@@ -154,7 +166,8 @@ app.post("/admin/api/clientes", requireAdmin, async (req, res) => {
     bienvenida: b.bienvenida || "",
     chips: Array.isArray(b.chips) ? b.chips : [],
     agendar_activo: b.agendar_activo !== false,
-    info: b.info || ""
+    info: b.info || "",
+    wa_phone_id: b.wa_phone_id ? String(b.wa_phone_id).trim() : null
   };
 
   const r = await fetch(`${SB_URL}/rest/v1/clientes`, {
@@ -362,14 +375,19 @@ app.post("/webhook", async (req, res) => {
     if (!msg || msg.type !== "text") return; // solo mensajes de texto
     const from = msg.from;
     const texto = msg.text.body;
-    console.log("➡️ WhatsApp recibido de", from, ":", texto);
+    const phoneId = (value.metadata && value.metadata.phone_number_id) || WA_PHONE_ID;
+    console.log("➡️ WhatsApp recibido en", phoneId, "de", from, ":", texto);
 
-    const c = await getCliente(WA_CLIENTE);
-    if (!c) { console.error("⚠️ WHATSAPP_CLIENTE no existe en la base:", WA_CLIENTE); return; }
+    // Identificar el cliente por el NÚMERO que recibió el mensaje (multi-cliente).
+    // Si no hay coincidencia, se usa WHATSAPP_CLIENTE como respaldo (modo un solo cliente).
+    let c = await getClientePorWaPhone(phoneId);
+    if (!c && WA_CLIENTE) c = await getCliente(WA_CLIENTE);
+    if (!c) { console.error("⚠️ Ningún cliente asociado al número de WhatsApp:", phoneId); return; }
 
-    if (!waHist[from]) waHist[from] = [];
-    waHist[from].push({ role: "user", content: texto });
-    if (waHist[from].length > 20) waHist[from] = waHist[from].slice(-20);
+    const key = phoneId + "_" + from; // memoria separada por número-de-negocio y por usuario
+    if (!waHist[key]) waHist[key] = [];
+    waHist[key].push({ role: "user", content: texto });
+    if (waHist[key].length > 20) waHist[key] = waHist[key].slice(-20);
 
     const sistema = construirSistema(c);
     const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -379,26 +397,27 @@ app.post("/webhook", async (req, res) => {
         "x-api-key": process.env.ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01"
       },
-      body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1000, system: sistema, messages: waHist[from] })
+      body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1000, system: sistema, messages: waHist[key] })
     });
     const data = await r.json();
     let out = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
     if (!out) out = "Disculpa, no pude procesar eso. ¿Puedes repetir?";
-    waHist[from].push({ role: "assistant", content: out });
+    waHist[key].push({ role: "assistant", content: out });
     // quitar etiquetas internas antes de enviar
     out = out.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").trim();
 
-    await enviarWhatsApp(from, out);
+    await enviarWhatsApp(from, out, phoneId);
   } catch (e) {
     console.error("💥 Error en webhook de WhatsApp:", e);
   }
 });
 
-// Enviar un mensaje de vuelta por WhatsApp
-async function enviarWhatsApp(to, texto) {
-  if (!WA_TOKEN || !WA_PHONE_ID) { console.error("🚨 Faltan WHATSAPP_TOKEN o WHATSAPP_PHONE_ID"); return; }
+// Enviar un mensaje de vuelta por WhatsApp (desde el número que recibió el mensaje)
+async function enviarWhatsApp(to, texto, phoneId) {
+  const pid = phoneId || WA_PHONE_ID;
+  if (!WA_TOKEN || !pid) { console.error("🚨 Faltan WHATSAPP_TOKEN o número de WhatsApp"); return; }
   try {
-    const r = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_ID}/messages`, {
+    const r = await fetch(`https://graph.facebook.com/v21.0/${pid}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + WA_TOKEN },
       body: JSON.stringify({ messaging_product: "whatsapp", to, type: "text", text: { body: texto } })
