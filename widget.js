@@ -135,7 +135,7 @@
       #cbw{position:fixed;right:26px;bottom:22px;z-index:2147483000;width:380px;max-width:calc(100vw - 40px);display:flex;flex-direction:column;align-items:flex-end;pointer-events:none}
       #cbw-win{pointer-events:none;width:100%;height:0;background:#fff;border-radius:26px;overflow:hidden;border:1px solid rgba(255,255,255,.6);box-shadow:0 2px 8px rgba(43,22,120,.08),0 18px 40px rgba(43,22,120,.16),0 44px 90px rgba(43,22,120,.22);display:flex;flex-direction:column;transform-origin:bottom right;transition:opacity .24s ease,transform .28s cubic-bezier(.2,.9,.25,1),height .28s cubic-bezier(.2,.9,.25,1);opacity:0;transform:translateY(14px) scale(.94);margin-bottom:-12px}
       #cbw.on #cbw-win{pointer-events:auto;opacity:1;transform:none;margin-bottom:2px}
-      #cbw-hd{position:relative;background:radial-gradient(130% 150% at 14% -20%,rgba(255,255,255,.32),rgba(255,255,255,0) 58%),linear-gradient(135deg,#7C5CFA 0%,#5B3EE0 52%,#3F22BE 100%);padding:14px 18px 14px 102px;height:66px;flex-shrink:0;display:flex;align-items:center;gap:12px;color:#fff}
+      #cbw-hd{position:relative;background:radial-gradient(130% 150% at 14% -20%,rgba(255,255,255,.32),rgba(255,255,255,0) 58%),linear-gradient(135deg,#7C5CFA 0%,#5B3EE0 52%,#3F22BE 100%);padding:14px 18px 14px 84px;height:64px;flex-shrink:0;display:flex;align-items:center;gap:12px;color:#fff}
       #cbw-hd .t{font-size:15.5px;font-weight:800;letter-spacing:-.015em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       #cbw-hd .s{font-size:11.5px;opacity:.85;display:flex;align-items:center;gap:6px;font-weight:600;margin-top:2px}
       #cbw-hd .p{width:7px;height:7px;border-radius:50%;background:#4ADE80;box-shadow:0 0 0 3px rgba(74,222,128,.25)}
@@ -176,7 +176,7 @@
     const hist=[]; let open=false, greeted=false, mood="idle", busy=false, moodTimer=null;
     let humanoAviso=false, lastPoll=new Date().toISOString();
     function setMood(x){ mood=x; bot.innerHTML=robotSVG(x); }
-    function reposBot(){ if(open){ const H=winH(); bot.style.right="calc(100% - 96px)"; bot.style.bottom=(H-110)+"px"; bot.style.width="88px"; bot.style.filter="drop-shadow(0 10px 16px rgba(20,8,70,.4))"; }
+    function reposBot(){ if(open){ const H=winH(); bot.style.right="calc(100% - 80px)"; bot.style.bottom=(H-96)+"px"; bot.style.width="60px"; bot.style.filter="drop-shadow(0 8px 14px rgba(20,8,70,.38))"; }
       else { bot.style.right="2px"; bot.style.bottom="0"; bot.style.width="132px"; bot.style.filter="drop-shadow(0 20px 28px rgba(76,49,214,.32))"; } }
     function setH(){ win.style.height=(open?winH():0)+"px"; }
     window.addEventListener("resize",()=>{ if(open){setH();reposBot();} });
