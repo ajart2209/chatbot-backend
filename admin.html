@@ -100,6 +100,14 @@
       <div class="msg" id="importMsg" style="color:#4C31D6;margin-top:8px;margin-bottom:0"></div>
     </div>
 
+    <div style="background:#EAF7EE;border:1px solid #C6E8D1;border-radius:12px;padding:14px;margin-bottom:18px">
+      <label style="margin-bottom:2px">📋 Importar ficha completa <span class="hint">(llena TODOS los campos de una vez)</span></label>
+      <div class="hint">Sube un archivo .json de ficha y se rellenan solos: nombre, subtítulo, bienvenida, botones, color, WhatsApp e información.</div>
+      <input type="file" id="f_ficha" accept=".json,application/json" style="margin-bottom:8px">
+      <button class="btn sec" onclick="importarFicha()">Cargar ficha completa</button>
+      <div class="msg" id="fichaMsg" style="color:#1e7a3d;margin-top:8px;margin-bottom:0"></div>
+    </div>
+
     <label>ID del cliente <span class="hint">(sin espacios, ej: peluqueria789 — este es el "data-cliente")</span></label>
     <input id="f_id" placeholder="peluqueria789">
 
@@ -461,6 +469,34 @@
       msg.style.color="#DC2626"; msg.textContent="No se pudo importar: "+e.message;
     }
     btn.textContent=old; btn.disabled=false;
+  }
+
+  async function importarFicha(){
+    const inp = document.getElementById("f_ficha");
+    const msg = document.getElementById("fichaMsg");
+    const file = inp.files[0];
+    if(!file){ msg.style.color="#DC2626"; msg.textContent="Elige un archivo .json primero."; return; }
+    try{
+      const d = JSON.parse(await file.text());
+      const set = (id,val)=>{ if(val!==undefined && val!==null) document.getElementById(id).value = val; };
+      set("f_id", d.id);
+      set("f_negocio", d.negocio);
+      set("f_subtitulo", d.subtitulo);
+      set("f_color", d.color);
+      set("f_whatsapp", d.whatsapp);
+      set("f_bienvenida", d.bienvenida);
+      if(Array.isArray(d.chips)) document.getElementById("f_chips").value = d.chips.filter(Boolean).join("\n");
+      else set("f_chips", d.chips);
+      if(typeof d.agendar_activo==="boolean") document.getElementById("f_agendar").checked = d.agendar_activo;
+      set("f_waphone", d.wa_phone_id ?? d.waphone);
+      set("f_fbpage", d.fb_page_id ?? d.fbpage);
+      set("f_fbtoken", d.fb_page_token ?? d.fbtoken);
+      if(d.reporte!==undefined) document.getElementById("f_reporte").value = d.reporte;
+      set("f_info", d.info);
+      msg.style.color="#1e7a3d"; msg.textContent="¡Listo! Todos los campos se llenaron. Revisa y dale Guardar. ✓";
+    }catch(e){
+      msg.style.color="#DC2626"; msg.textContent="No se pudo leer la ficha: "+e.message;
+    }
   }
 
   if(window.pdfjsLib){ pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; }
