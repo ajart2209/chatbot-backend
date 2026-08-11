@@ -135,6 +135,25 @@ function logConv(clienteId, visitante, canal, rol, texto) {
   }).catch(() => {});
 }
 
+// 🧹 Quita el formato Markdown para que el chat se vea limpio (como WhatsApp)
+function limpiarMarkdown(t) {
+  if (!t) return t;
+  return String(t)
+    .replace(/```[\s\S]*?```/g, m => m.replace(/```/g, "")) // bloques de código
+    .replace(/`([^`]+)`/g, "$1")            // `código` en línea
+    .replace(/\*\*([^*]+)\*\*/g, "$1")      // **negrita**
+    .replace(/__([^_]+)__/g, "$1")          // __negrita__
+    .replace(/\*([^*]+)\*/g, "$1")          // *cursiva*
+    .replace(/(^|\s)_([^_]+)_(?=\s|$)/g, "$1$2") // _cursiva_
+    .replace(/^#{1,6}\s+/gm, "")            // # Títulos
+    .replace(/^\s*>\s?/gm, "")              // > citas
+    .replace(/^\s*[-*+]\s+/gm, "")          // viñetas - * +
+    .replace(/^\s*\d+\.\s+/gm, "")          // listas numeradas
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [texto](url) -> texto
+    .replace(/\n{3,}/g, "\n\n")             // espacios de más
+    .trim();
+}
+
 // ¿El dueño/asesor tomó el control de esta conversación? (bot en pausa)
 async function chatPausado(clave) {
   try {
@@ -320,7 +339,7 @@ app.post("/chat", async (req, res) => {
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
     if (!text) console.error("⚠️ La API respondió OK pero sin texto:", JSON.stringify(data));
     if (text) { guardarCita(c, text, "web"); guardarLead(c, text, "web"); logMensaje(c.cliente_id, "web"); } // 📅🎯📊
-    const limpio = text.replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim(); // el LEAD es interno, no se muestra
+    const limpio = limpiarMarkdown(text.replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim()); // sin LEAD interno ni Markdown
     const paraLog = limpio.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").trim();
     if (paraLog) logConv(cliente, visitante, "web", "bot", paraLog); // transcripción
     res.json({ text: limpio || "Disculpa, no pude procesar eso. ¿Puedes reformular tu pregunta?" });
@@ -705,7 +724,7 @@ app.post("/webhook", async (req, res) => {
     guardarLead(c, out, "whatsapp");                   // 🎯 si captó un prospecto, guardarlo
     logMensaje(c.cliente_id, "whatsapp");              // 📊 contar para el reporte
     // quitar etiquetas internas antes de enviar
-    out = out.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim();
+    out = limpiarMarkdown(out.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim());
     logConv(c.cliente_id, from, "whatsapp", "bot", out); // transcripción
 
     await enviarWhatsApp(from, out, phoneId);
@@ -797,7 +816,7 @@ async function manejarMessenger(body) {
     guardarCita(c, out, "messenger");
     guardarLead(c, out, "messenger");
     logMensaje(c.cliente_id, "messenger");
-    out = out.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim();
+    out = limpiarMarkdown(out.replace(/\[M:[^\]]*\]/gi, "").replace(/\[CITA\][\s\S]*?\[\/CITA\]/g, "").replace(/\[LEAD\][\s\S]*?\[\/LEAD\]/g, "").trim());
     logConv(c.cliente_id, from, "messenger", "bot", out); // transcripción
 
     await enviarMessenger(c.fb_page_token, from, out);
